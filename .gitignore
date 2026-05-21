@@ -1,0 +1,28 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.streamlit/secrets.toml
+.DS_Store
+*.log
+
+# SQLite & runtime data
+data/*.db
+data/*.sqlite
+data/audio_cache/
+
+# Local-only large assets (placeholders documented in assets/README.md)
+assets/images/*.png
+assets/images/*.jpg
+assets/images/*.jpeg
+assets/images/*.webp
+
+# Voice reference & official clips (keep .gitkeep and official_clips.json)
+assets/audio/ref/*
+!assets/audio/ref/.gitkeep
+assets/audio/official_lines/*.wav
+assets/audio/official_lines/*.mp3
+assets/audio/official_lines/*.m4a
+!assets/audio/official_lines/.gitkeep
+!assets/audio/official_lines/official_clips.json
