@@ -8,6 +8,7 @@
 |------|------|
 | `ref/` | GPT-SoVITS 参考音频占位目录。请将您**合法拥有授权**的参考 wav 放在本地，并在 `.env` 中配置 `GPT_SOVITS_REF_AUDIO`。路径需能被 GPT-SoVITS 服务端读取。 |
 | `official_lines/` | 本地官方语音片段库（可选）。编辑 `official_clips.json` 登记文件路径，应用按场景播放。 |
+| `clips/` | **已废弃**，仅兼容旧配置；请迁移到 `official_lines/`。 |
 
 ## 官方语音片段
 

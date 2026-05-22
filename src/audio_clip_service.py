@@ -19,11 +19,30 @@ SCENES = (
     "relationship_up",
 )
 
-DEFAULT_CLIPS_DIR = PROJECT_ROOT / "assets" / "audio" / "clips"
+DEFAULT_CLIPS_DIR = PROJECT_ROOT / "assets" / "audio" / "official_lines"
+LEGACY_CLIPS_DIR = PROJECT_ROOT / "assets" / "audio" / "clips"
+
+
+def _resolve_clips_dir(configured: Path | None) -> Path:
+    """Prefer official_lines; fall back to legacy clips/ if only JSON exists there."""
+    if configured is not None:
+        base = configured if configured.is_absolute() else PROJECT_ROOT / configured
+    else:
+        base = DEFAULT_CLIPS_DIR
+
+    json_path = base / "official_clips.json"
+    if json_path.is_file():
+        return base
+
+    legacy_json = LEGACY_CLIPS_DIR / "official_clips.json"
+    if legacy_json.is_file() and base != LEGACY_CLIPS_DIR:
+        return LEGACY_CLIPS_DIR
+
+    return base
 
 
 class AudioClipService:
-    """Manage local official voice clips under assets/audio/clips by default."""
+    """Manage local official voice clips under assets/audio/official_lines by default."""
 
     def __init__(self, config=None, *, clips_dir: Path | str | None = None) -> None:
         if config is not None:
@@ -31,14 +50,12 @@ class AudioClipService:
             base = getattr(config, "official_clips_dir", None) or getattr(
                 config, "clips_dir", None
             )
-            self._clips_dir = Path(base) if base else DEFAULT_CLIPS_DIR
+            configured = Path(base) if base else None
         else:
             self._enabled = True
-            self._clips_dir = Path(clips_dir) if clips_dir else DEFAULT_CLIPS_DIR
+            configured = Path(clips_dir) if clips_dir else None
 
-        if not self._clips_dir.is_absolute():
-            self._clips_dir = PROJECT_ROOT / self._clips_dir
-
+        self._clips_dir = _resolve_clips_dir(configured)
         self._clips_path = self._clips_dir / "official_clips.json"
         self._scene_index: dict[str, list[str]] = {}
         self._load_scene_index()

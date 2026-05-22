@@ -164,7 +164,7 @@ def get_config() -> AppConfig:
         audio_clips=AudioClipConfig(
             enabled=_env_bool("ENABLE_OFFICIAL_CLIPS", "true"),
             official_clips_dir=PROJECT_ROOT / os.getenv(
-                "OFFICIAL_CLIPS_DIR", "assets/audio/clips"
+                "OFFICIAL_CLIPS_DIR", "assets/audio/official_lines"
             ),
         ),
         assets=AssetConfig(

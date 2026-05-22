@@ -6,6 +6,8 @@ import asyncio
 import base64
 import hashlib
 import json
+import shutil
+import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -16,9 +18,57 @@ from src.config import AppConfig, VoiceConfig
 
 _whisper_model_cache: dict[str, Any] = {}
 
+_CONVERT_SUFFIXES = {".mp3", ".m4a", ".ogg", ".webm"}
+
 
 def _md5_key(text: str, n: int = 16) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()[:n]
+
+
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+def _convert_to_wav(src: Path, cache_dir: Path) -> Path | None:
+    """Convert compressed audio to wav via ffmpeg when available."""
+    if not _ffmpeg_available():
+        return None
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out = cache_dir / f"stt_{src.stem}_{_md5_key(str(src), 8)}.wav"
+    if out.exists():
+        return out
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(src),
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(out),
+            ],
+            capture_output=True,
+            timeout=120,
+            check=True,
+        )
+        return out if out.is_file() else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def _prepare_stt_path(audio_path: Path, cache_dir: Path) -> tuple[Path, str | None]:
+    """Return path suitable for STT; convert via ffmpeg when needed."""
+    if audio_path.suffix.lower() not in _CONVERT_SUFFIXES:
+        return audio_path, None
+    converted = _convert_to_wav(audio_path, cache_dir)
+    if converted:
+        return converted, None
+    return audio_path, (
+        "mp3/m4a 转写建议安装 ffmpeg 并加入 PATH，或改用 wav 上传 / STT_PROVIDER=openai"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -250,12 +300,79 @@ class GPTSoVITSProvider(BaseTTSProvider):
                 continue
         return False, self.GPT_SOVITS_OFFLINE_MSG
 
+    def _resolved_ref_path(self) -> str:
+        ref = self._cfg.gpt_sovits_ref_audio
+        if not ref.is_absolute():
+            from src.config import PROJECT_ROOT
+
+            ref = PROJECT_ROOT / ref
+        return str(ref.resolve()) if ref.exists() else str(ref.resolve())
+
+    def _gradio_inference_payload(self, text: str) -> dict[str, Any]:
+        ref_path = self._resolved_ref_path()
+        prompt = self._cfg.gpt_sovits_prompt_text
+        prompt_lang = self._cfg.gpt_sovits_prompt_lang
+        text_lang = self._cfg.gpt_sovits_text_lang
+        speed = self._cfg.gpt_sovits_speed
+        return {
+            "data": [
+                text[:4096],
+                text_lang,
+                ref_path if Path(ref_path).exists() else None,
+                [],
+                prompt,
+                prompt_lang,
+                5,
+                1,
+                1,
+                "凑四句一切",
+                20,
+                speed,
+                False,
+                True,
+                0.3,
+                -1,
+                True,
+                True,
+                1.35,
+                32,
+                False,
+            ]
+        }
+
+    def _save_audio_response(self, resp: requests.Response, out_path: Path) -> Path | None:
+        content_type = resp.headers.get("content-type", "")
+        if "audio" in content_type or (len(resp.content) >= 4 and resp.content[:4] == b"RIFF"):
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            target = out_path if out_path.suffix.lower() == ".wav" else out_path.with_suffix(".wav")
+            target.write_bytes(resp.content)
+            return target
+        try:
+            data = resp.json()
+            if "data" in data and isinstance(data["data"], list) and data["data"]:
+                item = data["data"][0]
+                audio_url = item.get("url") or item.get("name")
+                if audio_url:
+                    if str(audio_url).startswith("http"):
+                        ar = requests.get(audio_url, timeout=60)
+                        if ar.status_code == 200:
+                            out_path.parent.mkdir(parents=True, exist_ok=True)
+                            out_path.write_bytes(ar.content)
+                            return out_path
+                    elif Path(audio_url).exists():
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        out_path.write_bytes(Path(audio_url).read_bytes())
+                        return out_path
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+        return None
+
     def synthesize(self, text: str, out_path: Path) -> tuple[Path | None, str | None]:
         online, msg = self.check_online()
         if not online:
             return None, msg
 
-        ref_path = str(self._cfg.gpt_sovits_ref_audio)
+        ref_path = self._resolved_ref_path()
         payload = {
             "refer_wav_path": ref_path,
             "prompt_text": self._cfg.gpt_sovits_prompt_text,
@@ -264,42 +381,20 @@ class GPTSoVITSProvider(BaseTTSProvider):
             "text_language": self._cfg.gpt_sovits_text_lang,
             "speed": self._cfg.gpt_sovits_speed,
         }
-        base = self._cfg.gpt_sovits_url
-        attempts: list[tuple[str, dict | None, bool]] = [
-            (base, payload, True),
-            (f"{base}/tts", {"text": text[:4096]}, True),
+        base = self._cfg.gpt_sovits_url.rstrip("/")
+        attempts: list[tuple[str, dict | None]] = [
+            (f"{base}/api/inference", self._gradio_inference_payload(text)),
+            (base, payload),
+            (f"{base}/tts", {"text": text[:4096]}),
         ]
 
-        for url, body, is_json in attempts:
+        for url, body in attempts:
             try:
-                if is_json and body:
-                    resp = requests.post(url, json=body, timeout=120)
-                else:
-                    resp = requests.post(url, json={"text": text[:4096]}, timeout=120)
+                resp = requests.post(url, json=body, timeout=120)
                 if resp.status_code == 200:
-                    content_type = resp.headers.get("content-type", "")
-                    if "audio" in content_type or resp.content[:4] == b"RIFF":
-                        out_path.parent.mkdir(parents=True, exist_ok=True)
-                        if out_path.suffix.lower() != ".wav":
-                            out_path = out_path.with_suffix(".wav")
-                        out_path.write_bytes(resp.content)
-                        return out_path, None
-                    try:
-                        data = resp.json()
-                        if "data" in data and isinstance(data["data"], list) and data["data"]:
-                            item = data["data"][0]
-                            audio_url = item.get("url") or item.get("name")
-                            if audio_url:
-                                if audio_url.startswith("http"):
-                                    ar = requests.get(audio_url, timeout=60)
-                                    if ar.status_code == 200:
-                                        out_path.write_bytes(ar.content)
-                                        return out_path, None
-                                elif Path(audio_url).exists():
-                                    out_path.write_bytes(Path(audio_url).read_bytes())
-                                    return out_path, None
-                    except (json.JSONDecodeError, KeyError):
-                        pass
+                    saved = self._save_audio_response(resp, out_path)
+                    if saved:
+                        return saved, None
             except requests.RequestException:
                 continue
 
@@ -423,7 +518,14 @@ class VoiceService:
             audio_path = save_path or self._save_input_audio(audio_bytes, suffix)
             if save_path is None and not audio_path.exists():
                 audio_path.write_bytes(audio_bytes)
-            text, err = self._stt.transcribe(audio_path)
+            stt_path, hint = _prepare_stt_path(
+                audio_path, self.voice_config.audio_cache_dir
+            )
+            text, err = self._stt.transcribe(stt_path)
+            if err and hint and audio_path.suffix.lower() in _CONVERT_SUFFIXES:
+                return None, f"{err}（{hint}）", audio_path
+            if err and hint and not text:
+                return None, hint, audio_path
             return text, err, audio_path
         except Exception as exc:
             return None, f"语音转写失败：{exc}", None
@@ -501,6 +603,11 @@ class VoiceService:
         return path, err
 
     def check_tts_status(self) -> dict[str, Any]:
+        ref = self.voice_config.gpt_sovits_ref_audio
+        if not ref.is_absolute():
+            from src.config import PROJECT_ROOT
+
+            ref = PROJECT_ROOT / ref
         status: dict[str, Any] = {
             "stt_provider": self.voice_config.stt_provider,
             "tts_provider": self.voice_config.tts_provider,
@@ -508,6 +615,9 @@ class VoiceService:
             "gpt_sovits_url": self.voice_config.gpt_sovits_url,
             "gpt_sovits_online": False,
             "gpt_sovits_message": "",
+            "ref_audio_path": str(ref),
+            "ref_audio_exists": ref.is_file(),
+            "ffmpeg_available": _ffmpeg_available(),
             "edge_tts_available": False,
         }
         try:

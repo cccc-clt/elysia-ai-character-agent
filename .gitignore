@@ -26,3 +26,9 @@ assets/audio/official_lines/*.mp3
 assets/audio/official_lines/*.m4a
 !assets/audio/official_lines/.gitkeep
 !assets/audio/official_lines/official_clips.json
+
+# Legacy clips dir (deprecated — use official_lines/)
+assets/audio/clips/*.wav
+assets/audio/clips/*.mp3
+assets/audio/clips/*.m4a
+!assets/audio/clips/.gitkeep

@@ -253,6 +253,7 @@ def main() -> None:
             st.session_state.get("last_assistant_reply", ""),
             clip_svc,
             config,
+            db=db if memory_service.using_sqlite else None,
         )
         if voice_payload:
             _handle_user_message(

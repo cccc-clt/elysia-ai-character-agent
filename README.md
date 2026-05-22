@@ -194,10 +194,17 @@ copy .env.example .env
 streamlit run app.py
 ```
 
+### 本地 STT 与 ffmpeg
+
+- `STT_PROVIDER=local_whisper` 时，**wav** 可直接转写；**mp3 / m4a** 建议本机安装 [ffmpeg](https://ffmpeg.org/) 并加入 PATH，应用会自动转为 wav 再转写。
+- Windows 可下载 ffmpeg 压缩包，将 `ffmpeg.exe` 所在目录加入系统环境变量 `Path`。
+- 无 ffmpeg 时可改用 `STT_PROVIDER=openai` 或上传 wav 文件。
+
 ### GPT-SoVITS 本地使用
 
-1. **自行安装并启动** [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) HTTP 服务（常见端口 `9872` 或官方 `api.py` 的 `9880`）。
-2. 在 `.env` 中配置：
+1. **自行安装并启动** [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) HTTP 服务（常见端口 `9872`；部分版本 Gradio 为 `9880`）。
+2. 本项目会依次尝试 `POST {GPT_SOVITS_URL}/api/inference`（Gradio）、根路径 JSON 与 `/tts`。
+3. 在 `.env` 中配置：
 
 ```env
 ENABLE_VOICE=true
@@ -242,6 +249,7 @@ GPT_SOVITS_PROMPT_TEXT=你的参考音频对应文本
 
 ### Streamlit Cloud
 
+- 云端部署建议 `ENABLE_VOICE=false`（避免 GPU/本地 GPT-SoVITS 依赖）。
 - Main file: `app.py`
 - Secrets 示例：
 

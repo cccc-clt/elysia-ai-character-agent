@@ -575,18 +575,26 @@ def render_chat_messages(
             conv_id = msg.get("id")
             out_audio = (msg.get("output_audio_path") or "").strip()
             if voice_on and conv_id is not None:
+                played = st.session_state.get(f"tts_play_{conv_id}")
+                audio_path = ""
                 if out_audio and Path(out_audio).is_file():
-                    st.audio(out_audio)
-                else:
-                    if st.button("生成语音", key=f"tts_gen_{conv_id}"):
+                    audio_path = out_audio
+                elif played and Path(played).is_file():
+                    audio_path = played
+                if audio_path:
+                    st.audio(audio_path)
+                    if st.button("重新生成语音", key=f"tts_regen_{conv_id}"):
                         action = {
                             "type": "generate_tts",
                             "conv_id": conv_id,
                             "content": content,
                         }
-                played = st.session_state.get(f"tts_play_{conv_id}")
-                if played and Path(played).is_file():
-                    st.audio(played)
+                elif st.button("生成语音", key=f"tts_gen_{conv_id}"):
+                    action = {
+                        "type": "generate_tts",
+                        "conv_id": conv_id,
+                        "content": content,
+                    }
 
             if show_feedback and conv_id is not None:
                 c1, c2, c3, c4 = st.columns(4)
@@ -961,6 +969,7 @@ def render_voice_page(
     last_reply: str,
     clip_svc: AudioClipService,
     config: AppConfig,
+    db: "Database | None" = None,
 ) -> dict[str, Any] | None:
     st.markdown('<p class="ely-section-title">语音陪伴</p>', unsafe_allow_html=True)
 
@@ -1002,6 +1011,13 @@ def render_voice_page(
         if err:
             st.warning(err)
             st.session_state.pop("voice_pending_transcript", None)
+            if db is not None:
+                db.insert_voice_log(
+                    session_id=config.session_id,
+                    stt_provider=config.voice.stt_provider,
+                    status="error",
+                    error_message=err,
+                )
         elif text:
             st.session_state["voice_pending_transcript"] = {
                 "text": text,
@@ -1033,6 +1049,8 @@ def render_voice_page(
 | Fallback TTS | `{status.get('tts_fallback_provider', '')}` |
 | GPT-SoVITS URL | `{status.get('gpt_sovits_url', '')}` |
 | GPT-SoVITS 在线 | {'是' if status.get('gpt_sovits_online') else '否'} |
+| 参考音频 | {'已就绪' if status.get('ref_audio_exists') else '未找到（见 assets/audio/ref/）'} |
+| ffmpeg | {'可用' if status.get('ffmpeg_available') else '未检测到（mp3/m4a 转写建议安装）'} |
 | edge-tts | {'可用' if status.get('edge_tts_available') else '未安装'} |
         """
     )
@@ -1069,11 +1087,11 @@ def render_voice_page(
         st.caption(f"本地已登记片段：共 {total} 条")
         if total == 0:
             st.info(
-                "尚未配置本地片段。请将 wav/mp3/ogg/m4a 放入 assets/audio/clips/ "
-                "或编辑该目录下的 official_clips.json。仓库不包含官方语音素材。"
+                "尚未配置本地片段。请将 wav/mp3/ogg/m4a 放入 assets/audio/official_lines/ "
+                "或编辑 official_clips.json。仓库不包含官方语音素材；请勿上传官方配音到公开仓库。"
             )
         else:
-            for scene in ("greeting", "comfort", "happy"):
+            for scene in ("greeting", "thinking", "comfort", "happy", "farewell"):
                 n = counts.get(scene, 0)
                 col_a, col_b = st.columns([2, 1])
                 col_a.caption(f"{scene}：{n} 条")
