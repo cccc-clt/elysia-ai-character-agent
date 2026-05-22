@@ -23,7 +23,7 @@
 
 **在线 Demo**：暂未部署（待补充）。本地运行见 [§9 启动方法](#9-启动方法)。
 
-将界面截图放入 [`docs/screenshots/`](docs/screenshots/) 后，README 将自动展示预览图：
+
 
 <p align="center">
   <img src="docs/screenshots/chat.png" alt="主聊天界面" width="720"/>
@@ -36,11 +36,6 @@
 <p align="center"><sub>记忆：长期记忆、待确认记忆、关系阶段</sub></p>
 
 <p align="center">
-  <img src="docs/screenshots/voice.png" alt="语音交互页" width="720"/>
-</p>
-<p align="center"><sub>语音：录音/上传、STT 转写、TTS 状态与 GPT-SoVITS 测试</sub></p>
-
-<p align="center">
   <img src="docs/screenshots/lab.png" alt="实验室页" width="720"/>
 </p>
 <p align="center"><sub>实验室：评估、玩家体验分析、角色卡与数据概览</sub></p>
@@ -49,15 +44,6 @@
   <img src="docs/screenshots/profile.png" alt="角色档案" width="720"/>
 </p>
 <p align="center"><sub>角色档案：角色设定与用户画像</sub></p>
-
-| 截图文件 | 说明 |
-|----------|------|
-| `chat.png` | 主聊天（立绘 / 状态卡 / 气泡 / 回复反馈） |
-| `memory.png` | 记忆页（长期记忆、待确认、整理） |
-| `voice.png` | 语音页（输入、Provider 状态、片段试听） |
-| `lab.png` | 实验室（评估、分析、角色卡） |
-| `profile.png` | 角色档案与用户画像 |
-| `sidebar.png` | 侧边栏（可选：角色名片与亲密度） |
 
 ---
 
@@ -532,13 +518,6 @@ SQLite 在云端可能因重启或实例回收而丢失，**适合 Demo，不适
 4. **SQLite** 面向单用户 Demo；多用户需 session 隔离与外置存储。  
 5. **角色一致性**由 LLM 评估，不能保证 100% 符合人设。  
 6. 生成内容由大模型产生，安全相关话题会尝试脱离角色设定进行提示。  
-
----
-
-## 15. 简历写法
-
-> **爱莉希雅 AI 角色陪伴应用** | Python, Streamlit, SQLite, LLM, GPT-SoVITS  
-> 独立开发 fan-made AI 角色陪伴应用，支持角色陪伴式 Prompt、多轮对话、长期记忆、用户画像、亲密度与关系阶段、每日陪伴、可选语音 STT/TTS、本地 GPT-SoVITS 接入、角色一致性评估与玩家体验分析；完成模块化工程结构、SQLite 持久化与 Streamlit Cloud / Hugging Face Spaces 部署方案设计。
 
 ---
 
