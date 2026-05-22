@@ -22,7 +22,7 @@
 - 长期记忆：偏好、称呼、重要事件、情绪、关系变化
 - 每 N 轮自动记忆整理；SQLite 持久化（可回退 JSON）
 - 亲密度 / 关系阶段 / 心情 / 每日问候
-- 可选语音：上传音频转写、回复 TTS 播放（通用音色，非官方配音）
+- 可选语音：录音/上传 → STT → 聊天 → TTS 播放，支持 GPT-SoVITS / edge-tts / OpenAI TTS
 - 角色一致性五维评估 + 历史均值
 - 玩家体验分析报告（游戏 AI 产品风格）
 - 角色卡 JSON 导入导出
@@ -49,7 +49,8 @@
 |------|------|
 | `database.py` | SQLite 多表持久化 |
 | `companionship_service.py` | 亲密度、关系阶段、心情 |
-| `voice_service.py` | 可选 STT/TTS |
+| `voice_service.py` | 可配置 STT/TTS Provider |
+| `audio_clip_service.py` | 本地官方语音片段（用户自备） |
 | `assets/` | 立绘/头像占位 |
 | UI | 聊天 / 记忆 / 语音 / 实验室 |
 
@@ -76,6 +77,8 @@ elysia-ai-character-agent/
 │   ├── README.md
 │   ├── images/           # 本地可选素材
 │   └── audio/
+│       ├── ref/                 # GPT-SoVITS 参考音频（本地，不入库）
+│       └── official_lines/      # 官方片段 JSON + 本地 wav（不入库）
 ├── src/
 │   ├── config.py
 │   ├── database.py
@@ -91,6 +94,7 @@ elysia-ai-character-agent/
 │   ├── feedback_service.py
 │   ├── reflection_service.py
 │   ├── voice_service.py
+│   ├── audio_clip_service.py
 │   ├── evaluator.py
 │   ├── analytics_service.py
 │   └── ui.py
@@ -131,12 +135,16 @@ streamlit run app.py
 | `STORAGE_BACKEND` | `sqlite`（默认）或 `json` |
 | `DATABASE_PATH` | SQLite 路径 |
 | `ENABLE_VOICE` | `true` 开启语音 |
-| `TTS_PROVIDER` | `edge` 或 `openai` |
-| `STT_PROVIDER` | `openai`（Whisper 兼容） |
+| `STT_PROVIDER` | `local_whisper` / `openai` / `baidu` |
+| `TTS_PROVIDER` | `edge` / `openai` / `gpt_sovits` / `custom` / `official_clips` |
+| `TTS_FALLBACK_PROVIDER` | GPT-SoVITS 失败时回退，默认 `edge` |
 | `VOICE_NAME` | edge-tts 音色，如 `zh-CN-XiaoxiaoNeural` |
+| `GPT_SOVITS_URL` | 本地 GPT-SoVITS 服务地址，默认 `http://localhost:9872` |
 | `PORTRAIT_PATH` / `BACKGROUND_PATH` / `AVATAR_PATH` | 素材路径 |
 
 完整列表见 [`.env.example`](.env.example)。
+
+> **迁移提示**：若从旧版升级，默认 STT 现为 `local_whisper`、TTS 为 `gpt_sovits`。无本地 Whisper 时可设 `STT_PROVIDER=openai`；无 GPT-SoVITS 时可设 `TTS_PROVIDER=edge`。
 
 ## 数据库说明
 
@@ -145,17 +153,90 @@ streamlit run app.py
 - `STORAGE_BACKEND=json` 时仅使用 JSON，不写 SQLite
 - 实验室页可查看记录数量与亲密度
 
-## 语音功能
+## 本地语音部署
 
-1. `.env` 设置 `ENABLE_VOICE=true`
-2. **输入**：「语音」页上传 wav/mp3/m4a → Whisper 兼容转写 → 送入聊天
-3. **输出**：「朗读最新回复」→ edge-tts 或 OpenAI TTS → `data/audio_cache/` → `st.audio`
-4. 未安装 `edge-tts` 时可将 `TTS_PROVIDER=openai`
-5. 语音为通用 TTS，**不代表官方角色配音**
+### 语音链路
+
+```
+用户语音输入（录音 / 上传）
+    → STT 转文字
+    → 现有聊天逻辑（LLM 生成爱莉希雅回复）
+    → TTS 生成语音
+    → Streamlit 播放
+    → 文本、音频路径写入 SQLite（conversations + voice_logs）
+```
+
+### 支持的 Provider
+
+| 类型 | Provider | 说明 |
+|------|----------|------|
+| STT | `local_whisper` | 本地 faster-whisper（默认，无需 API Key） |
+| STT | `openai` | OpenAI 兼容 Whisper（`AUDIO_API_KEY` 空则复用 `API_KEY`） |
+| STT | `baidu` | 百度语音识别（可选，需 `BAIDU_API_KEY` / `BAIDU_SECRET_KEY`） |
+| TTS | `edge` | edge-tts 兜底，生成 mp3 |
+| TTS | `openai` | OpenAI 兼容 TTS |
+| TTS | `gpt_sovits` | 本地 GPT-SoVITS HTTP 服务（高质量角色向语音） |
+| TTS | `custom` | 用户自有的合法授权本地 TTS HTTP 接口 |
+| 片段 | `official_clips` | 仅播放本地预置片段，不动态合成 |
+
+### 快速开始
+
+```bash
+pip install -r requirements.txt
+# 可选：本地 STT
+pip install faster-whisper
+# 可选：edge-tts 兜底
+pip install edge-tts
+
+copy .env.example .env
+# 编辑 ENABLE_VOICE=true、STT_PROVIDER、TTS_PROVIDER 等
+
+streamlit run app.py
+```
+
+### GPT-SoVITS 本地使用
+
+1. **自行安装并启动** [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) HTTP 服务（常见端口 `9872` 或官方 `api.py` 的 `9880`）。
+2. 在 `.env` 中配置：
+
+```env
+ENABLE_VOICE=true
+TTS_PROVIDER=gpt_sovits
+TTS_FALLBACK_PROVIDER=edge
+GPT_SOVITS_URL=http://localhost:9872
+GPT_SOVITS_REF_AUDIO=assets/audio/ref/elysia_ref.wav
+GPT_SOVITS_PROMPT_TEXT=你的参考音频对应文本
+```
+
+3. **参考音频**：将合法拥有的 wav 放入 `assets/audio/ref/`（该目录文件不会提交 Git）。`GPT_SOVITS_REF_AUDIO` 须为 **GPT-SoVITS 进程能读取的路径**（若在容器中运行，请使用容器内路径）。
+4. 本项目 **仅调用** 本地 HTTP 服务，**不包含** 任何官方声线模型、权重或参考音频。
+5. 服务未启动时，页面提示「未检测到本地 GPT-SoVITS 服务…」并自动回退 `edge-tts`，**不影响文字聊天**。
+
+### 官方语音片段（本地）
+
+- 编辑 [`assets/audio/official_lines/official_clips.json`](assets/audio/official_lines/official_clips.json) 登记场景与文件路径（`greeting` / `thinking` / `comfort` 等）。
+- 仓库 **不包含** 官方语音素材；片段仅供用户在本机合法使用。
+- **请勿** 将官方语音上传到公开 GitHub。
+- 本项目 **不提供** 声线克隆、官方声优复刻或素材提取教程。
+
+### 语音功能调试
+
+| 需求 | 配置 |
+|------|------|
+| 关闭语音 | `ENABLE_VOICE=false` |
+| 仅用 edge-tts | `TTS_PROVIDER=edge` |
+| 使用 GPT-SoVITS | `TTS_PROVIDER=gpt_sovits`，并启动本地服务 |
+| 使用云端 Whisper | `STT_PROVIDER=openai`，配置 `API_KEY` |
+| 清理生成缓存 | 「语音」页「一键清理缓存」，或删除 `data/audio_cache/` |
+
+### Custom TTS 接口
+
+`TTS_PROVIDER=custom` 时，向 `CUSTOM_TTS_ENDPOINT` 发送 JSON `{"text": "..."}`，响应为音频字节流，或 JSON 含 `audio_url` / `audio_path`。  
+**仅适用于您拥有合法授权的本地语音模型**，仓库不提供声线克隆教程。
 
 ## 素材使用
 
-见 [`assets/README.md`](assets/README.md)。将合法获得的图片放入 `assets/images/`；仓库不包含受版权保护的大体积官方素材。
+见 [`assets/README.md`](assets/README.md) 与 [`assets/audio/README.md`](assets/audio/README.md)。将合法获得的图片放入 `assets/images/`；仓库不包含受版权保护的大体积官方素材与官方配音。
 
 ## 部署
 
@@ -185,8 +266,11 @@ ENABLE_VOICE = "false"
 
 ## 版权与免责声明
 
-- 游戏与角色 IP 归原权利人所有；本项目非官方、非商业
-- 请勿上传官方大段台词或未经授权素材
+- 本项目为 **fan-made non-commercial demo**，与 miHoYo / HoYoverse **无任何官方关联**
+- **不拥有** 爱莉希雅角色、官方语音或游戏素材版权
+- 官方素材与语音片段仅限用户 **本地合法使用**；请勿将官方语音资源提交到公开仓库
+- 本项目 **不提供** 声线克隆教程，也 **不鼓励** 未授权复刻官方声线
+- 语音合成为通用 TTS 或用户自部署模型，**不代表** 官方角色配音
 - 生成内容由大模型产生，涉及安全话题时会做脱离角色的安全提示
 
 ## Roadmap

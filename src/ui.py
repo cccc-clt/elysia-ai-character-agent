@@ -19,6 +19,7 @@ from src.daily_companion_service import DailyCompanionView
 from src.evaluator import ConsistencyEvaluation
 from src.memory_service import MemoryStore
 from src.user_profile_service import UserProfileService
+from src.audio_clip_service import AudioClipService
 from src.voice_service import VoiceService
 
 # ---------------------------------------------------------------------------
@@ -540,10 +541,13 @@ def render_chat_messages(
     *,
     show_feedback: bool = False,
     last_user_snippet: str = "",
+    voice: VoiceService | None = None,
 ) -> dict[str, Any] | None:
-    """Returns feedback action dict if a button was clicked."""
+    """Returns action dict if a button was clicked (feedback or TTS)."""
     action: dict[str, Any] | None = None
     prev_user = last_user_snippet
+    voice_on = voice is not None and voice.is_enabled
+
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
@@ -566,9 +570,25 @@ def render_chat_messages(
             """,
             unsafe_allow_html=True,
         )
-        if show_feedback and role == "assistant":
+
+        if role == "assistant":
             conv_id = msg.get("id")
-            if conv_id is not None:
+            out_audio = (msg.get("output_audio_path") or "").strip()
+            if voice_on and conv_id is not None:
+                if out_audio and Path(out_audio).is_file():
+                    st.audio(out_audio)
+                else:
+                    if st.button("生成语音", key=f"tts_gen_{conv_id}"):
+                        action = {
+                            "type": "generate_tts",
+                            "conv_id": conv_id,
+                            "content": content,
+                        }
+                played = st.session_state.get(f"tts_play_{conv_id}")
+                if played and Path(played).is_file():
+                    st.audio(played)
+
+            if show_feedback and conv_id is not None:
                 c1, c2, c3, c4 = st.columns(4)
                 if c1.button("喜欢", key=f"fb_like_{conv_id}"):
                     action = {
@@ -624,8 +644,9 @@ def render_chat_page(
     comp_summary: dict[str, str] | None = None,
     daily: DailyCompanionView | None = None,
     show_feedback: bool = False,
+    voice: VoiceService | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
-    """Returns (chat_input, feedback_action)."""
+    """Returns (chat_input, action)."""
     if assets:
         render_hero_visual(assets)
     render_welcome_card()
@@ -636,15 +657,18 @@ def render_chat_page(
     for m in messages:
         if m.get("role") == "user":
             last_user = m.get("content", "")
-    feedback = render_chat_messages(
-        messages, show_feedback=show_feedback, last_user_snippet=last_user
+    action = render_chat_messages(
+        messages,
+        show_feedback=show_feedback,
+        last_user_snippet=last_user,
+        voice=voice,
     )
 
     user_input = st.chat_input(
         "发送给爱莉希雅…",
         key="chat_input_main",
     )
-    return user_input, feedback
+    return user_input, action
 
 
 # ---------------------------------------------------------------------------
@@ -921,43 +945,166 @@ def render_lab_db_status(db_stats: dict[str, Any], memory_backend: str) -> None:
 聊天记录：<strong>{db_stats.get('conversations', 0)}</strong> 条<br>
 记忆条目：<strong>{db_stats.get('memories', 0)}</strong> 条<br>
 评估记录：<strong>{db_stats.get('evaluations', 0)}</strong> 条<br>
+语音日志：<strong>{db_stats.get('voice_logs', 0)}</strong> 条<br>
 当前亲密度：<strong>{db_stats.get('intimacy_score', 20)}</strong> · { _esc(str(db_stats.get('relationship_stage', ''))) }
 </p>
         """
     )
 
 
-def render_voice_page(voice: VoiceService, last_reply: str) -> str | None:
+def _has_audio_input() -> bool:
+    return hasattr(st, "audio_input")
+
+
+def render_voice_page(
+    voice: VoiceService,
+    last_reply: str,
+    clip_svc: AudioClipService,
+    config: AppConfig,
+) -> dict[str, Any] | None:
     st.markdown('<p class="ely-section-title">语音陪伴</p>', unsafe_allow_html=True)
 
     if not voice.is_enabled:
         st.info(
-            "语音功能未开启。在 `.env` 设置 `ENABLE_VOICE=true` 后可使用上传音频转写与回复朗读。"
+            "语音功能未开启。在 `.env` 设置 `ENABLE_VOICE=true` 后可使用语音转写与回复朗读。"
             "语音为通用 TTS 风格，不代表官方配音。"
         )
         return None
 
-    st.caption("上传 wav / mp3 / m4a 进行语音转文字，或朗读爱莉希雅最新回复。")
+    # --- 1. 语音输入 ---
+    st.markdown("**语音输入**")
+    st.caption("录制或上传 wav / mp3 / m4a，转写后可确认发送给爱莉希雅。")
 
-    uploaded = st.file_uploader("上传音频转写", type=["wav", "mp3", "m4a", "ogg", "webm"])
+    audio_bytes: bytes | None = None
+    suffix = ".wav"
+
+    if _has_audio_input():
+        recorded = st.audio_input("录制语音", key="voice_audio_input")
+        if recorded is not None:
+            audio_bytes = recorded.getvalue()
+            suffix = ".wav"
+    else:
+        st.caption("当前 Streamlit 版本不支持内置录音，请使用上传音频。")
+
+    uploaded = st.file_uploader(
+        "上传音频文件",
+        type=["wav", "mp3", "m4a", "ogg", "webm"],
+        key="voice_file_upload",
+    )
     if uploaded is not None:
+        audio_bytes = uploaded.getvalue()
         suffix = Path(uploaded.name).suffix or ".wav"
-        text, err = voice.transcribe_upload(uploaded.getvalue(), suffix)
+
+    pending = st.session_state.get("voice_pending_transcript")
+    if audio_bytes and st.button("开始转写", key="voice_do_stt"):
+        with st.spinner("正在转写语音…"):
+            text, err, in_path = voice.transcribe_audio(audio_bytes, suffix)
         if err:
             st.warning(err)
+            st.session_state.pop("voice_pending_transcript", None)
         elif text:
-            st.success(f"转写结果：{text}")
-            return text
+            st.session_state["voice_pending_transcript"] = {
+                "text": text,
+                "input_audio_path": str(in_path) if in_path else "",
+            }
+            pending = st.session_state["voice_pending_transcript"]
 
+    if pending:
+        st.success(f"转写结果：{pending.get('text', '')}")
+        if st.button("发送给爱莉希雅", type="primary", key="voice_confirm_send"):
+            result = {
+                "text": pending["text"],
+                "input_audio_path": pending.get("input_audio_path", ""),
+            }
+            st.session_state.pop("voice_pending_transcript", None)
+            return result
+
+    st.divider()
+
+    # --- 2. TTS / STT 状态 ---
+    st.markdown("**语音服务状态**")
+    status = voice.check_tts_status()
+    st.markdown(
+        f"""
+| 项目 | 值 |
+|------|-----|
+| STT | `{status.get('stt_provider', '')}` |
+| TTS | `{status.get('tts_provider', '')}` |
+| Fallback TTS | `{status.get('tts_fallback_provider', '')}` |
+| GPT-SoVITS URL | `{status.get('gpt_sovits_url', '')}` |
+| GPT-SoVITS 在线 | {'是' if status.get('gpt_sovits_online') else '否'} |
+| edge-tts | {'可用' if status.get('edge_tts_available') else '未安装'} |
+        """
+    )
+    if status.get("gpt_sovits_message") and not status.get("gpt_sovits_online"):
+        st.warning(status["gpt_sovits_message"])
+
+    st.divider()
+
+    # --- 3. GPT-SoVITS 测试 ---
+    st.markdown("**GPT-SoVITS 测试**")
+    test_text = "嗨，亲爱的朋友，今天也想和我聊聊吗？"
+    c1, c2 = st.columns(2)
+    if c1.button("检测 GPT-SoVITS 服务", key="voice_check_sovits"):
+        s = voice.check_tts_status()
+        if s.get("gpt_sovits_online"):
+            st.success(s.get("gpt_sovits_message", "服务在线"))
+        else:
+            st.warning(s.get("gpt_sovits_message", "未检测到服务"))
+    if c2.button("测试生成一句语音", key="voice_test_sovits"):
+        with st.spinner("正在生成测试语音…"):
+            path, err, _ = voice.text_to_speech(test_text)
+        if err:
+            st.warning(err)
+        elif path:
+            st.audio(str(path))
+
+    st.divider()
+
+    # --- 4. 官方语音片段 ---
+    st.markdown("**官方语音片段（本地）**")
+    if clip_svc.is_enabled:
+        counts = clip_svc.count_clips()
+        total = clip_svc.total_clips()
+        st.caption(f"本地已登记片段：共 {total} 条")
+        if total == 0:
+            st.info(
+                "尚未配置本地片段。请将 wav/mp3/ogg/m4a 放入 assets/audio/clips/ "
+                "或编辑该目录下的 official_clips.json。仓库不包含官方语音素材。"
+            )
+        else:
+            for scene in ("greeting", "comfort", "happy"):
+                n = counts.get(scene, 0)
+                col_a, col_b = st.columns([2, 1])
+                col_a.caption(f"{scene}：{n} 条")
+                if col_b.button(f"试听 {scene}", key=f"clip_test_{scene}") and n > 0:
+                    clip = clip_svc.pick_clip(scene)
+                    if clip:
+                        st.audio(str(clip))
+    else:
+        st.caption("官方片段功能已关闭（ENABLE_OFFICIAL_CLIPS=false）")
+
+    st.divider()
+
+    # --- 5. 缓存管理 ---
+    st.markdown("**语音缓存**")
+    cache_dir = config.voice.audio_cache_dir
+    n_files = voice.count_cache_files()
+    st.caption(f"目录：`{cache_dir}` · 文件数：{n_files}")
+    if st.button("一键清理缓存", key="voice_clear_cache"):
+        removed, path = voice.clear_audio_cache()
+        st.success(f"已清理 {removed} 个文件（{path}）")
+
+    st.divider()
     if last_reply:
-        if st.button("朗读最新回复", type="primary", key="tts_last"):
+        if st.button("朗读最新回复", type="secondary", key="tts_last"):
             path, err = voice.synthesize_reply(last_reply)
             if err:
                 st.warning(err)
             elif path:
                 st.audio(str(path))
     else:
-        st.caption("先在「聊天」中收到回复后，可在此朗读。")
+        st.caption("先在「聊天」中收到回复后，可在此朗读最新回复。")
 
     return None
 

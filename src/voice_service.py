@@ -136,7 +136,8 @@ class BaiduSTT(BaseSTTProvider):
         if not token:
             return None, "百度语音识别 Token 获取失败"
         try:
-            audio_b64 = base64.b64encode(audio_path.read_bytes()).decode("utf-8")
+            raw = audio_path.read_bytes()
+            audio_b64 = base64.b64encode(raw).decode("utf-8")
             suffix = audio_path.suffix.lower()
             fmt_map = {".wav": "wav", ".mp3": "mp3", ".m4a": "m4a", ".ogg": "ogg", ".webm": "webm"}
             fmt = fmt_map.get(suffix, "wav")
@@ -149,7 +150,7 @@ class BaiduSTT(BaseSTTProvider):
                     "cuid": "elysia_companion",
                     "token": token,
                     "speech": audio_b64,
-                    "len": len(audio_path.read_bytes()),
+                    "len": len(raw),
                 },
                 timeout=30,
             )
@@ -472,9 +473,9 @@ class VoiceService:
             if not fb_path.exists():
                 path, fb_err = self._fallback_tts.synthesize(text, fb_path)
                 if path:
-                    return path, err, fb
+                    return path, None, fb
                 return None, fb_err or err, ""
-            return fb_path, err, fb
+            return fb_path, None, fb
 
         return None, err, ""
 

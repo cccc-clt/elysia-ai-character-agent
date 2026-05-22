@@ -164,7 +164,7 @@ def get_config() -> AppConfig:
         audio_clips=AudioClipConfig(
             enabled=_env_bool("ENABLE_OFFICIAL_CLIPS", "true"),
             official_clips_dir=PROJECT_ROOT / os.getenv(
-                "OFFICIAL_CLIPS_DIR", "assets/audio/official_lines"
+                "OFFICIAL_CLIPS_DIR", "assets/audio/clips"
             ),
         ),
         assets=AssetConfig(
@@ -184,5 +184,6 @@ def ensure_data_dirs() -> None:
     (ASSETS_DIR / "images").mkdir(parents=True, exist_ok=True)
     (ASSETS_DIR / "audio").mkdir(parents=True, exist_ok=True)
     (ASSETS_DIR / "audio" / "ref").mkdir(parents=True, exist_ok=True)
+    (ASSETS_DIR / "audio" / "clips").mkdir(parents=True, exist_ok=True)
     (ASSETS_DIR / "audio" / "official_lines").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "audio_cache").mkdir(parents=True, exist_ok=True)

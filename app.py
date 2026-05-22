@@ -19,6 +19,7 @@ from src.prompt_builder import build_system_prompt
 from src.reflection_service import ReflectionService
 from src.relationship_event_service import RelationshipEventService
 from src.user_profile_service import UserProfileService
+from src.audio_clip_service import AudioClipService
 from src.voice_service import VoiceService
 from src.ui import (
     init_session_state,
@@ -90,6 +91,16 @@ def get_daily_service() -> DailyCompanionService:
 @st.cache_resource
 def get_event_service() -> RelationshipEventService:
     return RelationshipEventService(get_database())
+
+
+@st.cache_resource
+def get_voice_service() -> VoiceService:
+    return VoiceService(config)
+
+
+@st.cache_resource
+def get_audio_clip_service() -> AudioClipService:
+    return AudioClipService(config.audio_clips)
 
 
 def get_feedback_service() -> FeedbackService:
@@ -181,9 +192,12 @@ def main() -> None:
 
     nav = render_main_nav()
 
+    voice_svc = get_voice_service()
+    clip_svc = get_audio_clip_service()
+
     if nav == "聊天":
         messages = _ensure_messages(memory_service)
-        user_input, feedback_action = render_chat_page(
+        user_input, chat_action = render_chat_page(
             messages,
             memory_service.memory,
             st.session_state["character"].name,
@@ -192,9 +206,13 @@ def main() -> None:
             comp_summary=comp_summary,
             daily=daily_view,
             show_feedback=memory_service.using_sqlite,
+            voice=voice_svc,
         )
-        if feedback_action:
-            _handle_feedback(feedback_action, memory_service, companionship_svc, event_svc)
+        if chat_action:
+            if chat_action.get("type") == "generate_tts":
+                _handle_generate_tts(chat_action, memory_service, db)
+            else:
+                _handle_feedback(chat_action, memory_service, companionship_svc, event_svc)
         elif user_input:
             _handle_user_message(user_input, memory_service, companionship_svc, event_svc, user_profile)
 
@@ -230,12 +248,23 @@ def main() -> None:
         render_profile_page(st.session_state["character"])
 
     elif nav == "语音":
-        voice_text = render_voice_page(
-            VoiceService(config, llm),
+        voice_payload = render_voice_page(
+            voice_svc,
             st.session_state.get("last_assistant_reply", ""),
+            clip_svc,
+            config,
         )
-        if voice_text:
-            _handle_user_message(voice_text, memory_service, companionship_svc, event_svc, user_profile)
+        if voice_payload:
+            _handle_user_message(
+                voice_payload["text"],
+                memory_service,
+                companionship_svc,
+                event_svc,
+                user_profile,
+                message_type="voice",
+                input_audio_path=voice_payload.get("input_audio_path", ""),
+                stt_text=voice_payload.get("text", ""),
+            )
 
     elif nav == "实验室":
         eval_summary = get_evaluation_summary(db)
@@ -291,6 +320,59 @@ def _handle_memory_actions(action: dict, memory_service: MemoryService, event_sv
         memory_service.clear_memory()
         st.warning("长期记忆已清空")
         st.rerun()
+
+
+def _handle_generate_tts(
+    action: dict,
+    memory_service: MemoryService,
+    db: Database,
+) -> None:
+    voice = get_voice_service()
+    conv_id = action.get("conv_id")
+    content = action.get("content", "")
+    if conv_id is None:
+        return
+
+    with st.spinner("正在生成语音…"):
+        path, err, prov = voice.generate_reply_audio(content, int(conv_id))
+
+    prov_used = prov or config.voice.tts_provider
+    if memory_service.using_sqlite:
+        if path:
+            db.update_conversation_voice(
+                int(conv_id),
+                output_audio_path=str(path),
+                tts_provider=prov_used,
+            )
+            db.insert_voice_log(
+                conversation_id=int(conv_id),
+                session_id=config.session_id,
+                tts_provider=prov_used,
+                output_audio_path=str(path),
+                source_text=content,
+                status="ok",
+            )
+        else:
+            db.insert_voice_log(
+                conversation_id=int(conv_id),
+                session_id=config.session_id,
+                tts_provider=prov_used,
+                source_text=content,
+                status="error",
+                error_message=err or "未知错误",
+            )
+
+    for msg in st.session_state.get("messages", []):
+        if msg.get("id") == conv_id:
+            if path:
+                msg["output_audio_path"] = str(path)
+            break
+
+    if path:
+        st.session_state[f"tts_play_{conv_id}"] = str(path)
+    if err:
+        st.warning(err)
+    st.rerun()
 
 
 def _handle_feedback(
@@ -358,13 +440,38 @@ def _handle_user_message(
     user_profile,
     *,
     skip_append_user: bool = False,
+    message_type: str = "text",
+    input_audio_path: str = "",
+    stt_text: str = "",
 ) -> None:
     character = st.session_state["character"]
     messages = st.session_state["messages"]
 
     if not skip_append_user:
-        messages.append({"role": "user", "content": user_input})
-        memory_service.append_chat("user", user_input, character.name)
+        user_msg: dict = {"role": "user", "content": user_input}
+        messages.append(user_msg)
+        voice_kwargs: dict = {}
+        if message_type == "voice":
+            voice_kwargs = {
+                "message_type": "voice",
+                "input_audio_path": input_audio_path,
+                "stt_text": stt_text or user_input,
+                "stt_provider": config.voice.stt_provider,
+            }
+        conv_id = memory_service.append_chat(
+            "user", user_input, character.name, **voice_kwargs
+        )
+        if conv_id:
+            user_msg["id"] = conv_id
+        if message_type == "voice" and memory_service.using_sqlite and memory_service._db:
+            memory_service._db.insert_voice_log(
+                conversation_id=conv_id,
+                session_id=config.session_id,
+                stt_provider=config.voice.stt_provider,
+                input_audio_path=input_audio_path,
+                transcript=stt_text or user_input,
+                status="ok",
+            )
         event_svc.on_first_user_message()
 
     llm = get_llm_client()
@@ -390,13 +497,20 @@ def _handle_user_message(
         companion_mode_instructions=get_mode_instructions(db),
     )
 
+    clip_svc = get_audio_clip_service()
+    thinking_clip = clip_svc.pick_clip("thinking") if config.audio_clips.enabled else None
+    if thinking_clip:
+        st.audio(str(thinking_clip))
+
     with st.spinner("爱莉希雅正在认真听你说的话……"):
         reply = llm.chat(system_prompt, user_input, model=config.llm.chat_model)
 
-    messages.append({"role": "assistant", "content": reply})
+    assistant_msg: dict = {"role": "assistant", "content": reply}
+    messages.append(assistant_msg)
     conv_id = memory_service.append_chat("assistant", reply, character.name)
     if conv_id:
         st.session_state["last_conv_id"] = conv_id
+        assistant_msg["id"] = conv_id
 
     turn = memory_service.increment_turn()
     st.session_state["last_assistant_reply"] = reply

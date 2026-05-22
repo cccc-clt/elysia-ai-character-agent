@@ -64,17 +64,45 @@ class LLMClient:
         content = response.choices[0].message.content
         return (content or "").strip()
 
-    def transcribe_audio(self, audio_path: Path, model: str = "whisper-1") -> str:
-        client = self._require_client()
+    def transcribe_audio(
+        self,
+        audio_path: Path,
+        model: str = "whisper-1",
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> str:
+        key = api_key or self._config.api_key
+        if not key:
+            raise ValueError("API_KEY is not set.")
+        client = OpenAI(
+            api_key=key,
+            base_url=base_url or self._config.base_url,
+        )
         with audio_path.open("rb") as f:
             result = client.audio.transcriptions.create(model=model, file=f)
         return (result.text or "").strip()
 
-    def synthesize_speech_openai(self, text: str, out_path: Path, voice: str = "alloy") -> Path:
-        client = self._require_client()
+    def synthesize_speech_openai(
+        self,
+        text: str,
+        out_path: Path,
+        voice: str = "alloy",
+        *,
+        model: str = "tts-1",
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> Path:
+        key = api_key or self._config.api_key
+        if not key:
+            raise ValueError("API_KEY is not set.")
+        client = OpenAI(
+            api_key=key,
+            base_url=base_url or self._config.base_url,
+        )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         response = client.audio.speech.create(
-            model="tts-1",
+            model=model,
             voice=voice,
             input=text[:4096],
         )

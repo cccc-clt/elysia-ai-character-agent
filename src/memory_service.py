@@ -215,9 +215,17 @@ class MemoryService:
             or m.emotional_states
         )
 
-    def append_chat(self, role: str, content: str, character_name: str = "") -> int | None:
+    def append_chat(
+        self,
+        role: str,
+        content: str,
+        character_name: str = "",
+        **voice_fields: Any,
+    ) -> int | None:
         if self._use_sqlite and self._db:
-            return self._db.insert_conversation(role, content, character_name, self.session_id)
+            return self._db.insert_conversation(
+                role, content, character_name, self.session_id, **voice_fields
+            )
         self.chat_logs.append(
             {
                 "role": role,

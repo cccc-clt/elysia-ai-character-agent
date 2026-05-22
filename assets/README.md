@@ -16,7 +16,9 @@ assets/
 │   ├── elysia_portrait.png   # 首页立绘（可选）
 │   ├── elysia_background.png # 背景图（可选）
 │   └── avatar.png            # 侧边栏头像（可选）
-└── audio/                    # 预留，应用生成语音缓存见 data/audio_cache/
+└── audio/                    # 参考音频与官方片段（见 audio/README.md）
+    ├── ref/                  # GPT-SoVITS 参考 wav（本地，不入库）
+    └── official_lines/       # official_clips.json + 本地片段
 ```
 
 ## 使用方式
@@ -28,4 +30,5 @@ assets/
 ## 建议
 
 - 作品集展示可使用自制插画、剪影或抽象粉色主题图。
-- 不要使用官方声优录音；语音功能使用通用 TTS，不代表官方配音。
+- 不要使用官方声优录音；语音功能使用通用 TTS 或用户自部署 GPT-SoVITS，不代表官方配音。
+- 官方语音片段说明见 [`audio/README.md`](audio/README.md)。
