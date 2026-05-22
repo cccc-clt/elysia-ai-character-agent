@@ -17,6 +17,27 @@
   <em>Elysia AI Character Companion — a fan-made AI character companion demo with memory, voice interaction, and persona evaluation.</em>
 </p>
 
+## 目录
+
+- [项目预览](#项目预览)
+- [1. 项目介绍](#1-项目介绍)
+- [2. 功能特点](#2-功能特点)
+- [3. 核心使用场景](#3-核心使用场景)
+- [4. 技术栈](#4-技术栈)
+- [5. 系统架构](#5-系统架构)
+- [6. 项目结构](#6-项目结构)
+- [7. 安装教程](#7-安装教程)
+- [8. 环境配置](#8-环境配置)
+- [9. 启动方法](#9-启动方法)
+- [10. 语音功能配置](#10-语音功能配置)
+- [11. 数据库与持久化说明](#11-数据库与持久化说明)
+- [12. 安全与隐私说明](#12-安全与隐私说明)
+- [13. 部署说明：Streamlit Cloud / Hugging Face Spaces](#13-部署说明-streamlit-cloud-hugging-face-spaces)
+- [14. 当前限制](#14-当前限制)
+- [16. 后续规划](#16-后续规划)
+- [17. 版权与免责声明](#17-版权与免责声明)
+- [18. License](#18-license)
+
 ---
 
 ## 项目预览
