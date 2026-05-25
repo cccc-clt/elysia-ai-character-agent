@@ -225,7 +225,7 @@ elysia-ai-character-agent/
 ### 克隆项目
 
 ```bash
-git clone https://github.com/<your-username>/elysia-ai-character-agent.git
+git clone https://github.com/cccc-clt/elysia-ai-character-agent.git
 cd elysia-ai-character-agent
 ```
 
