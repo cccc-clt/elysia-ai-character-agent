@@ -569,4 +569,4 @@ SQLite 在云端可能因重启或实例回收而丢失，**适合 Demo，不适
 
 ## 18. License
 
-MIT License（项目代码）。游戏及相关 IP 归原权利人所有。
+本项目代码采用 [MIT License](LICENSE)。游戏及相关 IP 归原权利人所有。
