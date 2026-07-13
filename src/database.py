@@ -60,6 +60,11 @@ class Database:
                     memory_type TEXT NOT NULL,
                     content TEXT NOT NULL,
                     importance INTEGER NOT NULL DEFAULT 3,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    deleted_at TEXT,
+                    delete_scope TEXT,
+                    source_message_ids TEXT NOT NULL DEFAULT '[]',
+                    source_profile_fields TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(memory_type, content)
@@ -114,7 +119,10 @@ class Database:
                     importance INTEGER NOT NULL DEFAULT 3,
                     status TEXT NOT NULL DEFAULT 'pending',
                     source TEXT DEFAULT 'auto',
-                    created_at TEXT NOT NULL
+                    source_message_ids TEXT NOT NULL DEFAULT '[]',
+                    source_profile_fields TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS daily_companion (
@@ -173,6 +181,9 @@ class Database:
                 """
             )
             self._migrate_schema(conn)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(status, updated_at)"
+            )
             row = conn.execute("SELECT id FROM companionship WHERE id = 1").fetchone()
             if row is None:
                 conn.execute(
@@ -205,14 +216,53 @@ class Database:
         ("stt_provider", "TEXT DEFAULT ''"),
     )
 
+    _MEMORY_LIFECYCLE_COLS = (
+        ("status", "TEXT NOT NULL DEFAULT 'active'"),
+        ("deleted_at", "TEXT"),
+        ("delete_scope", "TEXT"),
+        ("source_message_ids", "TEXT NOT NULL DEFAULT '[]'"),
+        ("source_profile_fields", "TEXT NOT NULL DEFAULT '[]'"),
+    )
+
+    _PENDING_SOURCE_COLS = (
+        ("source_message_ids", "TEXT NOT NULL DEFAULT '[]'"),
+        ("source_profile_fields", "TEXT NOT NULL DEFAULT '[]'"),
+        ("updated_at", "TEXT"),
+    )
+
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
-        existing = {
+        conversation_cols = {
             row[1]
             for row in conn.execute("PRAGMA table_info(conversations)").fetchall()
         }
         for col_name, col_def in self._CONV_VOICE_COLS:
-            if col_name not in existing:
+            if col_name not in conversation_cols:
                 conn.execute(f"ALTER TABLE conversations ADD COLUMN {col_name} {col_def}")
+
+        memory_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()
+        }
+        for col_name, col_def in self._MEMORY_LIFECYCLE_COLS:
+            if col_name not in memory_cols:
+                conn.execute(f"ALTER TABLE memories ADD COLUMN {col_name} {col_def}")
+
+        pending_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(pending_memories)").fetchall()
+        }
+        for col_name, col_def in self._PENDING_SOURCE_COLS:
+            if col_name not in pending_cols:
+                conn.execute(
+                    f"ALTER TABLE pending_memories ADD COLUMN {col_name} {col_def}"
+                )
+
+        conn.execute(
+            "UPDATE memories SET status = 'active' WHERE status IS NULL OR status = ''"
+        )
+
+    @staticmethod
+    def _json_list(values: list[int] | list[str] | None) -> str:
+        return json.dumps(values or [], ensure_ascii=False)
 
     def insert_conversation(
         self,
@@ -407,69 +457,238 @@ class Database:
         memory_type: str,
         content: str,
         importance: int = 3,
-    ) -> None:
+        source_message_ids: list[int] | None = None,
+        source_profile_fields: list[str] | None = None,
+    ) -> int | None:
         content = content.strip()
         if not content or memory_type not in MEMORY_TYPES:
-            return
+            return None
         importance = max(1, min(5, importance))
         now = _utc_now()
         with self._conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO memories (memory_type, content, importance, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(memory_type, content) DO UPDATE SET
-                    importance = MAX(importance, excluded.importance),
-                    updated_at = excluded.updated_at
-                """,
-                (memory_type, content, importance, now, now),
+            memory_id = self._upsert_memory_conn(
+                conn,
+                memory_type,
+                content,
+                importance,
+                source_message_ids,
+                source_profile_fields,
+                now,
+                allow_reactivate=False,
             )
             self._trim_memory_type(conn, memory_type, 30)
+            return memory_id
+
+    def _upsert_memory_conn(
+        self,
+        conn: sqlite3.Connection,
+        memory_type: str,
+        content: str,
+        importance: int,
+        source_message_ids: list[int] | None,
+        source_profile_fields: list[str] | None,
+        now: str,
+        allow_reactivate: bool,
+    ) -> int:
+        existing = conn.execute(
+            """
+            SELECT id, status, source_message_ids, source_profile_fields
+            FROM memories WHERE memory_type = ? AND content = ?
+            """,
+            (memory_type, content),
+        ).fetchone()
+        if existing is not None:
+            memory_id = int(existing["id"])
+            if existing["status"] == "deleted" and not allow_reactivate:
+                return memory_id
+            if existing["status"] == "deleted":
+                merged_message_ids = source_message_ids or []
+                merged_profile_fields = source_profile_fields or []
+            else:
+                try:
+                    old_message_ids = [
+                        int(value)
+                        for value in json.loads(existing["source_message_ids"] or "[]")
+                    ]
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    old_message_ids = []
+                try:
+                    old_profile_fields = json.loads(
+                        existing["source_profile_fields"] or "[]"
+                    )
+                except (TypeError, json.JSONDecodeError):
+                    old_profile_fields = []
+                merged_message_ids = sorted(
+                    set(old_message_ids) | set(source_message_ids or [])
+                )
+                merged_profile_fields = sorted(
+                    {str(value) for value in old_profile_fields}
+                    | set(source_profile_fields or [])
+                )
+            conn.execute(
+                """
+                UPDATE memories
+                SET importance = MAX(importance, ?), status = 'active',
+                    deleted_at = NULL, delete_scope = NULL,
+                    source_message_ids = ?, source_profile_fields = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    importance,
+                    self._json_list(merged_message_ids),
+                    self._json_list(merged_profile_fields),
+                    now,
+                    memory_id,
+                ),
+            )
+            return memory_id
+
+        cur = conn.execute(
+            """
+            INSERT INTO memories (
+                memory_type, content, importance, status, deleted_at, delete_scope,
+                source_message_ids, source_profile_fields, created_at, updated_at
+            ) VALUES (?, ?, ?, 'active', NULL, NULL, ?, ?, ?, ?)
+            """,
+            (
+                memory_type,
+                content,
+                importance,
+                self._json_list(source_message_ids),
+                self._json_list(source_profile_fields),
+                now,
+                now,
+            ),
+        )
+        return int(cur.lastrowid)
 
     def _trim_memory_type(
         self, conn: sqlite3.Connection, memory_type: str, max_count: int
     ) -> None:
         count = conn.execute(
-            "SELECT COUNT(*) AS c FROM memories WHERE memory_type = ?", (memory_type,)
+            "SELECT COUNT(*) AS c FROM memories WHERE memory_type = ? AND status = 'active'",
+            (memory_type,),
         ).fetchone()["c"]
         if count <= max_count:
             return
         excess = count - max_count
+        now = _utc_now()
         conn.execute(
             """
-            DELETE FROM memories WHERE id IN (
+            UPDATE memories
+            SET status = 'deleted', deleted_at = ?, delete_scope = 'long_term_only',
+                updated_at = ?
+            WHERE id IN (
                 SELECT id FROM memories WHERE memory_type = ?
+                AND status = 'active'
                 ORDER BY importance ASC, updated_at ASC
                 LIMIT ?
             )
             """,
-            (memory_type, excess),
+            (now, now, memory_type, excess),
         )
 
-    def list_memories(self, memory_type: str | None = None) -> list[dict[str, Any]]:
+    def list_memories(
+        self, memory_type: str | None = None, include_deleted: bool = False
+    ) -> list[dict[str, Any]]:
         with self._conn() as conn:
+            status_clause = "" if include_deleted else " AND status = 'active'"
             if memory_type:
                 rows = conn.execute(
-                    """
-                    SELECT id, memory_type, content, importance, updated_at
-                    FROM memories WHERE memory_type = ?
+                    f"""
+                    SELECT id, memory_type, content, importance, status, deleted_at,
+                           delete_scope, source_message_ids, source_profile_fields, updated_at
+                    FROM memories WHERE memory_type = ?{status_clause}
                     ORDER BY importance DESC, updated_at DESC
                     """,
                     (memory_type,),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """
-                    SELECT id, memory_type, content, importance, updated_at
-                    FROM memories
+                    f"""
+                    SELECT id, memory_type, content, importance, status, deleted_at,
+                           delete_scope, source_message_ids, source_profile_fields, updated_at
+                    FROM memories WHERE 1 = 1{status_clause}
                     ORDER BY memory_type, importance DESC, updated_at DESC
                     """
                 ).fetchall()
         return [dict(r) for r in rows]
 
-    def delete_memory(self, memory_id: int) -> None:
+    def get_memory(self, memory_id: int) -> dict[str, Any] | None:
         with self._conn() as conn:
-            conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            row = conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        return dict(row) if row else None
+
+    def delete_memory(
+        self, memory_id: int, scope: str = "all_prompt_sources"
+    ) -> dict[str, Any]:
+        if scope not in {"long_term_only", "all_prompt_sources"}:
+            raise ValueError(f"Unsupported delete scope: {scope}")
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM memories WHERE id = ?", (memory_id,)
+            ).fetchone()
+            if row is None:
+                return {
+                    "memory_id": memory_id,
+                    "status": "not_found",
+                    "previous_status": None,
+                    "affected_rows": 0,
+                    "scope": scope,
+                    "source_message_ids": "[]",
+                    "source_profile_fields": "[]",
+                }
+            previous_status = str(row["status"] or "active")
+            if previous_status == "deleted":
+                return {
+                    "memory_id": memory_id,
+                    "status": "already_deleted",
+                    "previous_status": previous_status,
+                    "affected_rows": 0,
+                    "scope": str(row["delete_scope"] or scope),
+                    "source_message_ids": str(row["source_message_ids"] or "[]"),
+                    "source_profile_fields": str(row["source_profile_fields"] or "[]"),
+                }
+            now = _utc_now()
+            cur = conn.execute(
+                """
+                UPDATE memories
+                SET status = 'deleted', deleted_at = ?, delete_scope = ?, updated_at = ?
+                WHERE id = ? AND status = 'active'
+                """,
+                (now, scope, now, memory_id),
+            )
+            return {
+                "memory_id": memory_id,
+                "status": "deleted" if cur.rowcount else "not_found",
+                "previous_status": previous_status,
+                "affected_rows": int(cur.rowcount),
+                "scope": scope,
+                "source_message_ids": str(row["source_message_ids"] or "[]"),
+                "source_profile_fields": str(row["source_profile_fields"] or "[]"),
+            }
+
+    def get_deleted_prompt_exclusions(self) -> dict[str, set[Any]]:
+        message_ids: set[int] = set()
+        profile_fields: set[str] = set()
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT source_message_ids, source_profile_fields
+                FROM memories
+                WHERE status = 'deleted' AND delete_scope = 'all_prompt_sources'
+                """
+            ).fetchall()
+        for row in rows:
+            try:
+                message_ids.update(int(value) for value in json.loads(row[0] or "[]"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+            try:
+                profile_fields.update(str(value) for value in json.loads(row[1] or "[]"))
+            except (TypeError, json.JSONDecodeError):
+                pass
+        return {"message_ids": message_ids, "profile_fields": profile_fields}
 
     def insert_pending_memory(
         self,
@@ -477,15 +696,28 @@ class Database:
         content: str,
         importance: int = 3,
         source: str = "auto",
+        source_message_ids: list[int] | None = None,
+        source_profile_fields: list[str] | None = None,
     ) -> int:
+        now = _utc_now()
         with self._conn() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO pending_memories (
-                    memory_type, content, importance, status, source, created_at
-                ) VALUES (?, ?, ?, 'pending', ?, ?)
+                    memory_type, content, importance, status, source,
+                    source_message_ids, source_profile_fields, created_at, updated_at
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)
                 """,
-                (memory_type, content.strip(), importance, source, _utc_now()),
+                (
+                    memory_type,
+                    content.strip(),
+                    importance,
+                    source,
+                    self._json_list(source_message_ids),
+                    self._json_list(source_profile_fields),
+                    now,
+                    now,
+                ),
             )
             return int(cur.lastrowid or 0)
 
@@ -507,34 +739,63 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
-    def update_pending_status(self, pending_id: int, status: str) -> None:
+    def update_pending_status(self, pending_id: int, status: str) -> bool:
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE pending_memories SET status = ? WHERE id = ?",
-                (status, pending_id),
+            cur = conn.execute(
+                """
+                UPDATE pending_memories SET status = ?, updated_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (status, _utc_now(), pending_id),
             )
+            return bool(cur.rowcount)
 
-    def update_pending_content(self, pending_id: int, content: str) -> None:
+    def update_pending_content(self, pending_id: int, content: str) -> bool:
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE pending_memories SET content = ? WHERE id = ?",
-                (content.strip(), pending_id),
+            cur = conn.execute(
+                """
+                UPDATE pending_memories SET content = ?, updated_at = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (content.strip(), _utc_now(), pending_id),
             )
+            return bool(cur.rowcount)
 
     def confirm_pending_memory(self, pending_id: int) -> bool:
-        row = self.get_pending_memory(pending_id)
-        if not row or row.get("status") != "pending":
-            return False
-        self.upsert_memory(
-            row["memory_type"],
-            row["content"],
-            int(row.get("importance", 3)),
-        )
-        self.update_pending_status(pending_id, "confirmed")
-        return True
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM pending_memories WHERE id = ?", (pending_id,)
+            ).fetchone()
+            if not row or row["status"] != "pending":
+                return False
+            now = _utc_now()
+            try:
+                message_ids = [int(value) for value in json.loads(row["source_message_ids"] or "[]")]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                message_ids = []
+            try:
+                profile_fields = [str(value) for value in json.loads(row["source_profile_fields"] or "[]")]
+            except (TypeError, json.JSONDecodeError):
+                profile_fields = []
+            self._upsert_memory_conn(
+                conn,
+                str(row["memory_type"]),
+                str(row["content"]),
+                int(row["importance"]),
+                message_ids,
+                profile_fields,
+                now,
+                allow_reactivate=True,
+            )
+            self._trim_memory_type(conn, str(row["memory_type"]), 30)
+            conn.execute(
+                "UPDATE pending_memories SET status = 'confirmed', updated_at = ? WHERE id = ?",
+                (now, pending_id),
+            )
+            return True
 
-    def reject_pending_memory(self, pending_id: int) -> None:
-        self.update_pending_status(pending_id, "rejected")
+    def reject_pending_memory(self, pending_id: int) -> bool:
+        return self.update_pending_status(pending_id, "rejected")
 
     def get_user_profile(self) -> dict[str, Any]:
         with self._conn() as conn:
@@ -740,7 +1001,9 @@ class Database:
 
     def count_memories(self) -> int:
         with self._conn() as conn:
-            row = conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM memories WHERE status = 'active'"
+            ).fetchone()
         return int(row["c"])
 
     def insert_evaluation(
@@ -860,7 +1123,9 @@ class Database:
         comp = self.get_companionship()
         with self._conn() as conn:
             conv = conn.execute("SELECT COUNT(*) AS c FROM conversations").fetchone()["c"]
-            mem = conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()["c"]
+            mem = conn.execute(
+                "SELECT COUNT(*) AS c FROM memories WHERE status = 'active'"
+            ).fetchone()["c"]
             ev = conn.execute("SELECT COUNT(*) AS c FROM evaluations").fetchone()["c"]
             try:
                 vl = conn.execute("SELECT COUNT(*) AS c FROM voice_logs").fetchone()["c"]

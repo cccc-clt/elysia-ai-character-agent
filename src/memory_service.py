@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import AppConfig
-from src.database import Database
+from src.database import MEMORY_TYPES, Database
 from src.llm_client import LLMClient
 
 
@@ -88,6 +88,40 @@ class MemoryStore:
         self.summary = ""
         self.turn_count = 0
         self.last_summarized_at = ""
+
+
+@dataclass(frozen=True)
+class PromptMemoryContext:
+    long_term_memory: str
+    excluded_message_ids: frozenset[int] = frozenset()
+    excluded_profile_fields: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class DeleteMemoryResult:
+    memory_id: int
+    status: str
+    previous_status: str | None
+    affected_rows: int
+    scope: str
+    excluded_message_ids: tuple[int, ...] = ()
+    excluded_profile_fields: tuple[str, ...] = ()
+
+
+def _parse_json_ints(raw: Any) -> tuple[int, ...]:
+    try:
+        values = json.loads(raw) if isinstance(raw, str) else raw
+        return tuple(int(value) for value in values or [])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+
+
+def _parse_json_strings(raw: Any) -> tuple[str, ...]:
+    try:
+        values = json.loads(raw) if isinstance(raw, str) else raw
+        return tuple(str(value) for value in values or [])
+    except (TypeError, json.JSONDecodeError):
+        return ()
 
 
 class MemoryService:
@@ -205,6 +239,23 @@ class MemoryService:
             self._sync_memory_from_db()
         return self.memory.to_display_text()
 
+    def get_prompt_memory_context(self) -> PromptMemoryContext:
+        exclusions: dict[str, set[Any]] = {
+            "message_ids": set(),
+            "profile_fields": set(),
+        }
+        if self._use_sqlite and self._db:
+            exclusions = self._db.get_deleted_prompt_exclusions()
+        return PromptMemoryContext(
+            long_term_memory=self.get_long_term_memory_text(),
+            excluded_message_ids=frozenset(
+                int(value) for value in exclusions["message_ids"]
+            ),
+            excluded_profile_fields=frozenset(
+                str(value) for value in exclusions["profile_fields"]
+            ),
+        )
+
     def has_substantive_memory(self) -> bool:
         m = self.memory
         return bool(
@@ -297,20 +348,42 @@ class MemoryService:
             return ok
         return False
 
-    def reject_pending(self, pending_id: int) -> None:
+    def reject_pending(self, pending_id: int) -> bool:
         if self._use_sqlite and self._db:
-            self._db.reject_pending_memory(pending_id)
+            return self._db.reject_pending_memory(pending_id)
+        return False
 
     def edit_and_confirm(self, pending_id: int, new_content: str) -> bool:
         if self._use_sqlite and self._db:
-            self._db.update_pending_content(pending_id, new_content)
+            if not self._db.update_pending_content(pending_id, new_content):
+                return False
             return self.confirm_pending(pending_id)
         return False
 
-    def delete_memory_by_id(self, memory_id: int) -> None:
+    def delete_memory_by_id(
+        self, memory_id: int, scope: str = "all_prompt_sources"
+    ) -> DeleteMemoryResult:
         if self._use_sqlite and self._db:
-            self._db.delete_memory(memory_id)
+            raw = self._db.delete_memory(memory_id, scope)
             self._sync_memory_from_db()
+            return DeleteMemoryResult(
+                memory_id=memory_id,
+                status=str(raw["status"]),
+                previous_status=raw.get("previous_status"),
+                affected_rows=int(raw["affected_rows"]),
+                scope=str(raw["scope"]),
+                excluded_message_ids=_parse_json_ints(raw.get("source_message_ids")),
+                excluded_profile_fields=_parse_json_strings(
+                    raw.get("source_profile_fields")
+                ),
+            )
+        return DeleteMemoryResult(
+            memory_id=memory_id,
+            status="unsupported",
+            previous_status=None,
+            affected_rows=0,
+            scope=scope,
+        )
 
     def add_manual_pending(self, content: str, memory_type: str = "important_event") -> int | None:
         if self._use_sqlite and self._db:
@@ -320,13 +393,19 @@ class MemoryService:
     def summarize_memory(
         self,
         llm: LLMClient,
-        recent_messages: list[dict[str, str]],
+        recent_messages: list[dict[str, Any]],
         model: str | None = None,
     ) -> str:
+        recent = recent_messages[-12:]
         history_text = "\n".join(
             f"{'玩家' if m['role'] == 'user' else '角色'}：{m['content']}"
-            for m in recent_messages[-12:]
+            for m in recent
         )
+        valid_source_ids = {
+            int(m["id"])
+            for m in recent
+            if m.get("role") == "user" and isinstance(m.get("id"), int)
+        }
         existing = self.memory.to_display_text()
 
         system = (
@@ -337,8 +416,23 @@ class MemoryService:
             "另含 summary 字符串(200字内，可选)。"
             "只提取对话中明确出现的信息。"
         )
+        system += (
+            "每个 item 必须包含 source_message_ids 数组，只能填写 recent_messages 中"
+            "直接支持该记忆的用户消息 id。"
+        )
         user_msg = json.dumps(
-            {"existing_memory": existing, "recent_conversation": history_text},
+            {
+                "existing_memory": existing,
+                "recent_conversation": history_text,
+                "recent_messages": [
+                    {
+                        "id": m.get("id"),
+                        "role": m.get("role"),
+                        "content": m.get("content", ""),
+                    }
+                    for m in recent
+                ],
+            },
             ensure_ascii=False,
         )
 
@@ -356,26 +450,46 @@ class MemoryService:
                     continue
                 mtype = str(item.get("type", "")).strip()
                 content = str(item.get("content", "")).strip()
-                imp = int(item.get("importance", 3)) if item.get("importance") else 3
-                if mtype and content:
-                    if self._use_sqlite and self._db:
-                        self._db.insert_pending_memory(mtype, content, imp, "auto")
-                        pending_count += 1
-                    else:
-                        self._upsert_memory_item(mtype, content, imp)
+                if mtype not in MEMORY_TYPES or not content:
+                    continue
+                try:
+                    imp = max(1, min(5, int(item.get("importance", 3))))
+                except (TypeError, ValueError):
+                    imp = 3
+                requested_ids = _parse_json_ints(item.get("source_message_ids", []))
+                source_ids = [
+                    value for value in requested_ids if value in valid_source_ids
+                ]
+                if valid_source_ids and not source_ids:
+                    continue
+                if self._use_sqlite and self._db:
+                    self._db.insert_pending_memory(
+                        mtype,
+                        content,
+                        imp,
+                        "auto",
+                        source_message_ids=source_ids,
+                    )
+                    pending_count += 1
 
         if data.get("summary"):
             summary = str(data["summary"]).strip()
-            if self._use_sqlite and self._db:
-                self._db.insert_pending_memory("summary", summary, 4, "auto")
+            if summary and self._use_sqlite and self._db:
+                self._db.insert_pending_memory(
+                    "summary",
+                    summary,
+                    4,
+                    "auto",
+                    source_message_ids=sorted(valid_source_ids),
+                )
                 pending_count += 1
-            else:
-                self._upsert_memory_item("summary", summary, 4)
 
         self.memory.last_summarized_at = _utc_now()
         self.save_memory()
         if pending_count:
             return f"已整理 {pending_count} 条待确认记忆，请到「记忆」页确认。"
+        if not self._use_sqlite:
+            return "当前 JSON 存储后端不支持候选记忆确认，本次未写入长期记忆。"
         return self.get_long_term_memory_text()
 
     @property

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.character_profile import CharacterProfile
 
 PROMPT_TEMPLATE = """你正在扮演爱莉希雅风格的角色，与用户进行一对一陪伴式聊天。
@@ -28,7 +30,7 @@ PROMPT_TEMPLATE = """你正在扮演爱莉希雅风格的角色，与用户进�
 长期记忆：
 {long_term_memory}
 
-当前对话历史：
+当前对话历史（临时上下文，不代表长期记忆）：
 {chat_history}
 
 行为规则：
@@ -48,11 +50,28 @@ PROMPT_TEMPLATE = """你正在扮演爱莉希雅风格的角色，与用户进�
 请以角色身份回复。"""
 
 
-def format_chat_history(messages: list[dict[str, str]], max_turns: int = 20) -> str:
-    if not messages:
+def format_chat_history(
+    messages: list[dict[str, Any]],
+    max_turns: int = 20,
+    excluded_message_ids: set[int] | frozenset[int] | None = None,
+) -> str:
+    excluded = excluded_message_ids or set()
+    visible_messages: list[dict[str, Any]] = []
+    suppress_source_reply = False
+    for message in messages:
+        role = message.get("role", "user")
+        if message.get("id") in excluded:
+            suppress_source_reply = role == "user"
+            continue
+        if role == "user":
+            suppress_source_reply = False
+        elif suppress_source_reply:
+            continue
+        visible_messages.append(message)
+    if not visible_messages:
         return "（暂无历史对话）"
 
-    recent = messages[-max_turns * 2 :]
+    recent = visible_messages[-max_turns * 2 :]
     lines: list[str] = []
     for msg in recent:
         role = msg.get("role", "user")
@@ -65,12 +84,13 @@ def format_chat_history(messages: list[dict[str, str]], max_turns: int = 20) -> 
 def build_system_prompt(
     character: CharacterProfile,
     long_term_memory: str,
-    chat_history: list[dict[str, str]],
+    chat_history: list[dict[str, Any]],
     user_input: str,
     max_history_turns: int = 20,
     companionship_context: str = "",
     user_profile_context: str = "",
     companion_mode_instructions: str = "",
+    excluded_message_ids: set[int] | frozenset[int] | None = None,
 ) -> str:
     return PROMPT_TEMPLATE.format(
         name=character.name,
@@ -83,6 +103,10 @@ def build_system_prompt(
         companion_mode_instructions=companion_mode_instructions or "日常陪伴模式",
         companionship_context=companionship_context or "（默认温柔陪伴中）",
         long_term_memory=long_term_memory or "（暂无长期记忆）",
-        chat_history=format_chat_history(chat_history, max_history_turns),
+        chat_history=format_chat_history(
+            chat_history,
+            max_history_turns,
+            excluded_message_ids=excluded_message_ids,
+        ),
         user_input=user_input,
     )
