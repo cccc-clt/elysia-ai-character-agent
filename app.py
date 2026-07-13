@@ -311,7 +311,23 @@ def _handle_memory_actions(action: dict, memory_service: MemoryService, event_sv
         st.success("已保存并记住")
         st.rerun()
     if action.get("delete_id"):
-        memory_service.delete_memory_by_id(action["delete_id"])
+        result = memory_service.delete_memory_by_id(
+            action["delete_id"], scope="all_prompt_sources"
+        )
+        if result.status == "deleted":
+            if result.excluded_message_ids or result.excluded_profile_fields:
+                st.toast("记忆已删除，已关联来源将不再进入后续 Prompt。")
+            else:
+                st.toast("长期记忆已删除；该记录没有可定位的历史来源。")
+        elif result.status == "already_deleted":
+            st.toast("这条记忆此前已删除。")
+            return
+        elif result.status == "not_found":
+            st.warning("未找到可删除的记忆，未修改对话或长期记忆。")
+            return
+        else:
+            st.warning("当前存储后端不支持按条删除记忆。")
+            return
         st.rerun()
     if action.get("summarize"):
         _run_memory_summarize(memory_service)
@@ -484,18 +500,22 @@ def _handle_user_message(
     comp_state = companionship_svc.load_state()
     daily_svc = get_daily_service()
     daily_view = daily_svc.ensure_today(comp_state.relationship_stage)
+    prompt_memory = memory_service.get_prompt_memory_context()
 
     system_prompt = build_system_prompt(
         character=character,
-        long_term_memory=memory_service.get_long_term_memory_text(),
+        long_term_memory=prompt_memory.long_term_memory,
         chat_history=messages[:-1] if not skip_append_user else messages,
         user_input=user_input,
         max_history_turns=config.max_history_turns,
         companionship_context=comp_state.to_prompt_context(
             daily_view.greeting, daily_view.little_note
         ),
-        user_profile_context=user_profile.to_prompt_context(),
+        user_profile_context=user_profile.to_prompt_context(
+            prompt_memory.excluded_profile_fields
+        ),
         companion_mode_instructions=get_mode_instructions(db),
+        excluded_message_ids=prompt_memory.excluded_message_ids,
     )
 
     clip_svc = get_audio_clip_service()
