@@ -26,10 +26,24 @@ QUERY_ALIASES = {
     "逐火十三英桀": "英桀 逐火之蛾",
     "十三英桀": "英桀 逐火之蛾",
     "黄金庭园": "黄金庭院",
+    "约束的惨剧": "约束惨剧",
+    "帕朵": "帕朵菲莉丝",
 }
+SINGLE_CHARACTER_ENTITIES = ("华", "苏", "樱")
+
+
+def _single_character_entity_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    left = r"(?:^|[\s\n：:、，。！？「」『』【】/\\\-]|关于)"
+    right = r"(?:$|[\s\n：:、，。！？「」『』【】/\\\-]|如何|怎么|怎样|的|与|和|说|评价|谈)"
+    for name in SINGLE_CHARACTER_ENTITIES:
+        if re.search(left + re.escape(name) + right, value):
+            tokens.append(f"entity:{name}")
+    return tokens
 
 
 def tokenize(value: str) -> list[str]:
+    entity_tokens = _single_character_entity_tokens(value)
     expansions = " ".join(
         replacement for alias, replacement in QUERY_ALIASES.items() if alias in value
     )
@@ -41,7 +55,7 @@ def tokenize(value: str) -> list[str]:
     for run in chinese_runs:
         tokens.extend(run[index : index + 2] for index in range(max(0, len(run) - 1)))
         tokens.extend(run[index : index + 3] for index in range(max(0, len(run) - 2)))
-    return tokens
+    return [*tokens, *entity_tokens]
 
 
 @dataclass(frozen=True)
@@ -96,16 +110,29 @@ class BM25Retriever:
 
 
 def _searchable_text(chunk: LoreChunk) -> str:
+    explicit_entity_tokens = set(
+        _single_character_entity_tokens(f"{chunk.title}\n{chunk.content}")
+    )
+    searchable_characters = (
+        name
+        for name in chunk.character_names
+        if len(name) > 1 or f"entity:{name}" in explicit_entity_tokens
+    )
     return "\n".join(
         (
             chunk.title,
+            chunk.title,
             chunk.chapter,
             chunk.scene,
-            " ".join(chunk.character_names),
+            " ".join(searchable_characters),
             " ".join(chunk.topic_names),
             chunk.content,
         )
     )
+
+
+def _chunk_fingerprint(chunk: LoreChunk) -> str:
+    return sha256(_searchable_text(chunk).encode("utf-8")).hexdigest()
 
 
 def _hashed_vector(value: str, dimensions: int = HASHED_VECTOR_DIMENSIONS) -> dict[int, float]:
@@ -144,7 +171,7 @@ class HashedVectorIndex:
             signature=LoreCorpus.signature(chunks),
             vectors={row.chunk_id: _hashed_vector(_searchable_text(row)) for row in chunks},
             chunk_hashes={
-                row.chunk_id: sha256(row.content.encode("utf-8")).hexdigest()
+                row.chunk_id: _chunk_fingerprint(row)
                 for row in chunks
             },
         )
@@ -210,8 +237,7 @@ class HashedVectorRetriever:
         self, query: str, chunks: list[LoreChunk], *, top_k: int
     ) -> list[RankedChunk]:
         if any(
-            self._index.chunk_hashes.get(row.chunk_id)
-            != sha256(row.content.encode("utf-8")).hexdigest()
+            self._index.chunk_hashes.get(row.chunk_id) != _chunk_fingerprint(row)
             for row in chunks
         ):
             raise ValueError("lore vector index is stale for the selected corpus")

@@ -5,9 +5,14 @@ import time
 from pathlib import Path
 
 from src.config import LoreRAGConfig
-from src.lore.corpus import LoreCorpus, is_safe_source_url
+from src.lore.corpus import (
+    LoreCorpus,
+    canonical_source_url,
+    is_safe_source_url,
+    normalized_content_hash,
+)
 from src.lore.models import LoreChunk
-from src.lore.retrieval import HashedVectorIndex
+from src.lore.retrieval import HashedVectorIndex, tokenize
 from src.lore.service import LoreRAG, route_lore_query
 from src.prompt_builder import build_system_prompt
 from src.character_profile import CharacterProfile
@@ -213,6 +218,28 @@ def test_stale_vector_index_fails_open_to_bm25(tmp_path: Path) -> None:
     assert result.used is True
 
 
+def test_metadata_change_marks_vector_index_stale(tmp_path: Path) -> None:
+    config = _config(tmp_path, backend="hybrid")
+    corpus = _corpus(tmp_path, config)
+    chunks, _ = corpus.load(("official_lore", "bh3text_dialogue"))
+    HashedVectorIndex.build(chunks).write(config.index_path, prototype_only=True)
+    official_path = tmp_path / "official.jsonl"
+    rows = [json.loads(line) for line in official_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["metadata"]["title"] = "改变后的官方标题"
+    _write_jsonl(official_path, rows)
+    fresh_corpus = LoreCorpus(
+        config,
+        corpus_paths={
+            "official_lore": official_path,
+            "bh3text_dialogue": tmp_path / "transcript.jsonl",
+            "story_navigation": tmp_path / "navigation.jsonl",
+        },
+    )
+    result = LoreRAG(config, corpus=fresh_corpus).retrieve("爱莉希雅是谁")
+    assert result.backend == "bm25_fallback"
+    assert result.degraded_reason == "vector_index_missing_stale_or_invalid"
+
+
 def test_corrupt_vector_index_fails_open_to_bm25(tmp_path: Path) -> None:
     config = _config(tmp_path, backend="hybrid")
     corpus = _corpus(tmp_path, config)
@@ -315,3 +342,18 @@ def test_prompt_keeps_lore_in_a_separate_layer() -> None:
     assert "长期记忆：\n用户喜欢夜间学习" in prompt
     assert "相关设定检索资料" in prompt
     assert "[资料 1] 官方设定证据" in prompt
+
+
+def test_canonical_source_and_normalized_content_deduplication_helpers() -> None:
+    assert canonical_source_url(
+        "https://WWW.BH3TEXT.COM/dialog/er/1/example/?utm_source=test#part"
+    ) == "https://www.bh3text.com/dialog/er/1/example"
+    assert normalized_content_hash("爱莉希雅：你好。") == normalized_content_hash(
+        "爱莉希雅： 你 好。"
+    )
+
+
+def test_single_character_entity_tokens_avoid_common_word_collisions() -> None:
+    assert "entity:樱" in tokenize("樱如何评价爱莉希雅")
+    assert "entity:苏" in tokenize("苏-关于爱莉希雅")
+    assert "entity:华" not in tokenize("才华横溢")

@@ -38,6 +38,10 @@ from data_pipeline.coverage import (
 )
 from data_pipeline.crawler import OfficialLoreCrawler
 from data_pipeline.extractor import extract_html
+from data_pipeline.lore_integrity import (
+    build_lore_integrity_audit,
+    normalize_bh3text_metadata,
+)
 from data_pipeline.manual_official import ManualRecordValidationError, load_manual_records
 from data_pipeline.normalizer import normalize_documents
 from data_pipeline.relevance import clean_content_for_url, clean_document_text, score_candidate
@@ -112,6 +116,8 @@ def _paths(tmp_path: Path) -> PipelinePaths:
         manual_source_gap=data / "manifests" / "manual_source_gap.md",
         source_inventory=data / "manifests" / "source_inventory.json",
         deduplication_report=data / "manifests" / "deduplication_report.md",
+        lore_integrity_audit=data / "manifests" / "lore_integrity_audit.json",
+        lore_integrity_audit_markdown=data / "manifests" / "lore_integrity_audit.md",
         manual_templates_dir=data / "manual_official" / "templates",
         manual_inbox_dir=data / "manual_official" / "inbox",
         manual_accepted_dir=data / "manual_official" / "accepted",
@@ -2159,3 +2165,47 @@ def test_source_inventory_keeps_community_corpora_out_of_official_counts(
     report = paths.deduplication_report.read_text(encoding="utf-8")
     assert document.dialogue_turns[0].text not in report
     assert "社区文档计入official文档数：0" in report
+
+
+def test_bh3text_integrity_normalizes_safe_topics_and_url_chapter() -> None:
+    document = _bh3text_document().model_copy(
+        update={
+            "arc": "错误篇章",
+            "chapter": "错误章节",
+            "source_url": "https://www.bh3text.com/dialog/mainline/1/31/31-12-1",
+            "topic_names": ["黄金庭园", "约束的惨剧"],
+        }
+    )
+    normalized, repairs = normalize_bh3text_metadata([document])
+    assert normalized[0].arc == "主线第一部"
+    assert normalized[0].chapter == "第三十一章 因你而在的故事"
+    assert normalized[0].topic_names == ["约束惨剧", "黄金庭院"]
+    assert repairs == {"chapter_attribution": 1, "topic_surface_normalization": 1}
+    assert normalized[0].source_tier == "Tier B-primary-transcript"
+    assert normalized[0].review_status == "unverified_transcript"
+
+
+def test_integrity_audit_never_merges_semantic_aliases(tmp_path: Path) -> None:
+    document = _bh3text_document().model_copy(
+        update={
+            "character_names": ["爱莉希雅", "樱"],
+            "topic_names": ["人之律者"],
+        }
+    )
+    payload = build_lore_integrity_audit(
+        [document],
+        chunk_bh3text_document(document),
+        repairs={},
+        json_path=tmp_path / "integrity.json",
+        markdown_path=tmp_path / "integrity.md",
+    )
+    assert payload["aliases"]["semantic_aliases_auto_merged"] == 0
+    assert all(
+        row["status"] == "blocked_human"
+        for row in payload["aliases"]["semantic_alias_candidates"]
+    )
+    assert payload["source_tier_guard"] == {
+        "bh3text_official_documents": 0,
+        "confirmed_relations_generated": 0,
+    }
+    assert "语义别名和人格称谓均未自动合并" in (tmp_path / "integrity.md").read_text(encoding="utf-8")

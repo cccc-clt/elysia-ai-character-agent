@@ -102,7 +102,9 @@ def _diversify_documents(
     used_documents: set[str] = set()
     deferred: list[RankedChunk] = []
     for item in ranking:
-        document_key = item.chunk.document_id or item.chunk.source_url
+        # A source URL is the stable source-document identity.  A duplicated
+        # community copy must not become diverse merely because its local ID differs.
+        document_key = item.chunk.source_url or item.chunk.document_id
         if document_key in used_documents:
             deferred.append(item)
             continue
@@ -128,10 +130,22 @@ def _metadata_rerank(
         "navigation": "story_navigation",
     }.get(route)
 
-    def key(item: RankedChunk) -> tuple[int, int, float, str]:
+    directed_match = re.match(
+        r"^(.{1,12}?)(?:如何评价|如何谈到|怎么评价|怎么谈到)(.{1,16}?)(?:的剧情对话)?[？?]?$",
+        query.strip(),
+    )
+    directed_title = ""
+    if directed_match:
+        directed_title = (
+            f"{directed_match.group(1).strip()}-关于"
+            f"{directed_match.group(2).strip()}"
+        )
+
+    def key(item: RankedChunk) -> tuple[int, int, int, float, str]:
         title_overlap = len(query_tokens.intersection(tokenize(item.chunk.title)))
         return (
             0 if not preferred or item.chunk.corpus == preferred else 1,
+            0 if directed_title and item.chunk.title.startswith(directed_title) else 1,
             -title_overlap,
             -item.score,
             item.chunk.chunk_id,
@@ -218,7 +232,7 @@ class LoreRAG:
                 warnings=tuple(warnings),
             )
         bm25 = BM25Retriever()
-        expanded_top_k = max(self._config.top_k * 4, 10)
+        expanded_top_k = max(self._config.top_k * 10, 50)
         backend = self._config.backend
         degraded_reason = ""
         ranking: list[RankedChunk]

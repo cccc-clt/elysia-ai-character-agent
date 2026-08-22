@@ -256,6 +256,7 @@ def build_source_inventory(paths: PipelinePaths | None = None) -> dict[str, Any]
             "Tier B-curated-index",
             "community",
         ],
+        "entity_chapter_dedup_audit": read_json(paths.lore_integrity_audit, {}),
     }
     write_json(paths.source_inventory, payload)
     _write_deduplication_report(paths, payload)
@@ -266,6 +267,7 @@ def _write_deduplication_report(paths: PipelinePaths, payload: dict[str, Any]) -
     corpora = payload["corpora"]
     dedup = payload["deduplication"]
     gate = payload["development_prototype_gate"]
+    integrity = payload.get("entity_chapter_dedup_audit", {})
     lines = [
         "# Lore 来源去重与结构验证报告",
         "",
@@ -294,6 +296,14 @@ def _write_deduplication_report(paths: PipelinePaths, payload: dict[str, Any]) -
             f"- BH3Helper→BH3Text元数据映射：{dedup['bh3helper_bh3text_metadata_mappings']}",
             "- BH3Helper嵌入对话进入检索副本：0；剧情正文只以BH3Text语料为候选副本。",
             "- 社区文档计入official文档数：0。",
+            "",
+            "## 实体、章节与规范化URL审计",
+            "",
+            f"- 自动metadata修复：{sum(integrity.get('automatic_repairs', {}).values())}",
+            f"- 剩余章节归属冲突：{len(integrity.get('chapter_attribution', {}).get('remaining_mismatches', []))}",
+            f"- 自动语义别名合并：{integrity.get('aliases', {}).get('semantic_aliases_auto_merged', 0)}",
+            f"- 待人工speaker变体：{len(integrity.get('aliases', {}).get('speaker_variants', []))}",
+            f"- 规范化URL重复组：{len(integrity.get('deduplication', {}).get('normalized_source_url_duplicates', []))}",
             "",
             "## 开发原型门",
             "",

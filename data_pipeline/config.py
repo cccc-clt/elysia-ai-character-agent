@@ -242,6 +242,12 @@ class PipelinePaths:
     deduplication_report: Path = (
         PROJECT_ROOT / "data" / "manifests" / "deduplication_report.md"
     )
+    lore_integrity_audit: Path = (
+        PROJECT_ROOT / "data" / "manifests" / "lore_integrity_audit.json"
+    )
+    lore_integrity_audit_markdown: Path = (
+        PROJECT_ROOT / "data" / "manifests" / "lore_integrity_audit.md"
+    )
     manual_templates_dir: Path = PROJECT_ROOT / "data" / "manual_official" / "templates"
     manual_inbox_dir: Path = PROJECT_ROOT / "data" / "manual_official" / "inbox"
     manual_accepted_dir: Path = PROJECT_ROOT / "data" / "manual_official" / "accepted"

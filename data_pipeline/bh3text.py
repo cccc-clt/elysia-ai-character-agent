@@ -29,6 +29,10 @@ from data_pipeline.schemas import (
     DialogueEvidenceEdge,
     DialogueTurn,
 )
+from data_pipeline.lore_integrity import (
+    build_lore_integrity_audit,
+    normalize_bh3text_metadata,
+)
 from data_pipeline.utils import (
     content_hash,
     normalize_url,
@@ -1488,6 +1492,12 @@ def _rebuild_outputs(paths: PipelinePaths) -> dict[str, Any]:
     documents = [
         BH3TextDocument.model_validate(row) for row in read_jsonl(paths.bh3text_documents)
     ]
+    documents, metadata_repairs = normalize_bh3text_metadata(documents)
+    if metadata_repairs:
+        write_jsonl(
+            paths.bh3text_documents,
+            [row.model_dump(mode="json") for row in documents],
+        )
     chunks = [chunk for document in documents for chunk in chunk_bh3text_document(document)]
     evidence_edges = [
         edge for document in documents for edge in build_dialogue_evidence_edges(document)
@@ -1508,6 +1518,13 @@ def _rebuild_outputs(paths: PipelinePaths) -> dict[str, Any]:
     )
     verification_count = write_transcript_verification(paths, documents)
     readiness = build_vector_readiness(paths, documents, chunks)
+    build_lore_integrity_audit(
+        documents,
+        chunks,
+        repairs=metadata_repairs,
+        json_path=paths.lore_integrity_audit,
+        markdown_path=paths.lore_integrity_audit_markdown,
+    )
     sampled_verified = sum(
         row.get("verification_status") in {"match", "minor_mismatch"}
         for row in read_jsonl(paths.bh3text_transcript_verification_jsonl)
@@ -1519,6 +1536,7 @@ def _rebuild_outputs(paths: PipelinePaths) -> dict[str, Any]:
         "chunks": len(chunks),
         "evidence_edges": len(evidence_edges),
         "pending_relations": len(pending_relations),
+        "metadata_repairs": sum(metadata_repairs.values()),
         "verification_scenes": verification_count,
         "sampled_verified_documents": sampled_verified,
         "independent_transcript_index_ready": index_ready,

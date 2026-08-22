@@ -37,6 +37,11 @@ from data_pipeline.video_sources import (
 
 
 def _print(payload: dict[str, Any]) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 

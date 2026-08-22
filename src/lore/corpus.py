@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from src.config import PROJECT_ROOT, LoreRAGConfig
 from src.lore.models import CorpusName, LoreChunk
@@ -28,6 +30,41 @@ SOURCE_PRECEDENCE = {
     "C": 6,
     "pending": 7,
 }
+
+_IGNORED_SOURCE_QUERY_KEYS = {"from", "source", "spm", "timestamp"}
+
+
+def canonical_source_url(value: str) -> str:
+    if value.startswith("manual-official://"):
+        return value
+    parsed = urlparse(value.strip())
+    if parsed.scheme != "https" or not parsed.hostname:
+        return value
+    host = parsed.hostname.lower().rstrip(".")
+    try:
+        port = parsed.port
+    except ValueError:
+        return value
+    netloc = host if not port or port == 443 else f"{host}:{port}"
+    path = re.sub(r"/{2,}", "/", parsed.path or "/")
+    if path != "/":
+        path = path.rstrip("/")
+    query = urlencode(
+        sorted(
+            (key, item)
+            for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+            if not key.lower().startswith("utm_")
+            and key.lower() not in _IGNORED_SOURCE_QUERY_KEYS
+        ),
+        doseq=True,
+    )
+    return urlunparse(("https", netloc, path, "", query, ""))
+
+
+def normalized_content_hash(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = re.sub(r"\s+", "", normalized)
+    return sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def is_safe_source_url(value: str) -> bool:
@@ -54,7 +91,7 @@ def _official_chunk(row: dict[str, Any]) -> LoreChunk | None:
     metadata = row.get("metadata", {})
     if not isinstance(metadata, dict):
         return None
-    source_url = str(metadata.get("source_url", ""))
+    source_url = canonical_source_url(str(metadata.get("source_url", "")))
     if not is_safe_source_url(source_url):
         return None
     return LoreChunk(
@@ -72,7 +109,7 @@ def _official_chunk(row: dict[str, Any]) -> LoreChunk | None:
 
 
 def _bh3text_chunk(row: dict[str, Any]) -> LoreChunk | None:
-    source_url = str(row.get("source_url", ""))
+    source_url = canonical_source_url(str(row.get("source_url", "")))
     if not source_url.startswith("https://www.bh3text.com/dialog/"):
         return None
     return LoreChunk(
@@ -93,7 +130,7 @@ def _bh3text_chunk(row: dict[str, Any]) -> LoreChunk | None:
 
 
 def _navigation_chunk(row: dict[str, Any]) -> LoreChunk | None:
-    source_url = str(row.get("source_url", ""))
+    source_url = canonical_source_url(str(row.get("source_url", "")))
     if not source_url.startswith("https://bh3helper.xrysnow.xyz/"):
         return None
     return LoreChunk(
@@ -157,7 +194,7 @@ class LoreCorpus:
             chunks,
             key=lambda row: (SOURCE_PRECEDENCE.get(row.source_tier, 99), row.chunk_id),
         ):
-            digest = sha256(chunk.content.encode("utf-8")).hexdigest()
+            digest = normalized_content_hash(chunk.content)
             if chunk.chunk_id in deduplicated or digest in hashes:
                 continue
             deduplicated[chunk.chunk_id] = chunk
@@ -168,5 +205,20 @@ class LoreCorpus:
 
     @staticmethod
     def signature(chunks: Iterable[LoreChunk]) -> str:
-        value = "\n".join(sorted(f"{row.chunk_id}:{sha256(row.content.encode('utf-8')).hexdigest()}" for row in chunks))
+        value = "\n".join(
+            sorted(
+                ":".join(
+                    (
+                        row.chunk_id,
+                        row.title,
+                        row.chapter,
+                        row.scene,
+                        "|".join(row.character_names),
+                        "|".join(row.topic_names),
+                        sha256(row.content.encode("utf-8")).hexdigest(),
+                    )
+                )
+                for row in chunks
+            )
+        )
         return sha256(value.encode("utf-8")).hexdigest()
