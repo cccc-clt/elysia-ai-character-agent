@@ -2020,11 +2020,20 @@ def test_build_bh3text_never_auto_marks_verification_match(tmp_path: Path) -> No
     assert len(verification) == 10
     assert {row["verification_status"] for row in verification} == {"not_checked"}
     assert all(3 <= len(row["sample_turns"]) <= 5 for row in verification)
+    assert all(row["source_tier"] == "Tier B-primary-transcript" for row in verification)
+    assert all(row["scene_context"] for row in verification)
+    assert all(row["character_names"] for row in verification)
+    assert all(row["evidence_excerpt"] for row in verification)
+    assert all(len(row["confirmation_items"]) == 5 for row in verification)
     assert result["vector_ready"] is False
     report = paths.bh3text_transcript_verification.read_text(encoding="utf-8")
     assert "minor_mismatch" in report
     assert "critical_mismatch" in report
     assert "绝不会自行填写 `match`" in report
+    assert "场景上下文" in report
+    assert "涉及角色" in report
+    assert "证据片段（原顺序3～5轮）" in report
+    assert "待确认项" in report
 
 
 def test_critical_mismatch_blocks_otherwise_satisfied_vector_gate(

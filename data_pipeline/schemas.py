@@ -453,6 +453,13 @@ class BH3TextVerificationRecord(StrictModel):
     arc: str = Field(min_length=1)
     chapter: str = Field(min_length=1)
     source_url: str = Field(pattern=r"^https://www\.bh3text\.com/dialog/")
+    source_tier: Literal["Tier B-primary-transcript"] = (
+        "Tier B-primary-transcript"
+    )
+    scene_context: str = ""
+    character_names: list[str] = Field(default_factory=list)
+    evidence_excerpt: str = ""
+    confirmation_items: list[str] = Field(default_factory=list)
     video_id: str = ""
     suggested_video_part: str = ""
     video_timestamp: str = ""

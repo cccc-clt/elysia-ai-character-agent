@@ -15,6 +15,13 @@
 
 在上述人工项完成前，所有转录检索能力只能标记为开发原型，正式启用必须保持关闭。
 
+完整核验材料由 `python -m data_pipeline.cli build-bh3text` 生成到：
+
+- `data/review/bh3text_transcript_verification.jsonl`：机器可读记录；
+- `data/review/bh3text_transcript_verification.md`：逐场人工核验包。
+
+每个场景均包含篇章、章节、场景上下文、角色、BH3Text原始URL、3～5轮短证据和5项待确认内容。两份文件包含未核验剧情片段，因此继续保持Git ignored；本清单只提交任务状态和定位信息。
+
 ## Current 10-scene verification queue
 
 | Scene | Chapter | Suggested video/part | Current status |

@@ -1218,6 +1218,54 @@ def _sample_turns(document: BH3TextDocument) -> list[DialogueTurn]:
     return turns[start : start + min(5, len(turns))]
 
 
+VERIFICATION_CONFIRMATION_ITEMS = (
+    "页面场景与视频或游戏原文中的场景明确对应",
+    "抽样范围内的说话者标注一致",
+    "证据片段中的3至5轮台词内容一致",
+    "抽样范围没有关键台词缺失",
+    "没有混入其他场景或改变身份、关系、事件含义",
+)
+
+
+def _verification_context(
+    document: BH3TextDocument,
+    sample_turns: list[DialogueTurn],
+) -> str:
+    """Locate the excerpt in the page without inventing plot context."""
+
+    start = sample_turns[0].turn_index
+    end = sample_turns[-1].turn_index
+    positions = {
+        turn.turn_index: index for index, turn in enumerate(document.dialogue_turns)
+    }
+    start_position = positions.get(start, 0)
+    end_position = positions.get(end, len(document.dialogue_turns) - 1)
+    neighbors: list[str] = []
+    if start_position > 0:
+        previous = document.dialogue_turns[start_position - 1]
+        neighbors.append(f"前一轮：{_render_turn(previous)[:120]}")
+    if end_position + 1 < len(document.dialogue_turns):
+        following = document.dialogue_turns[end_position + 1]
+        neighbors.append(f"后一轮：{_render_turn(following)[:120]}")
+    location = (
+        f"页面场景《{document.scene}》共{len(document.dialogue_turns)}轮；"
+        f"证据抽样位于第{start}至{end}轮。"
+    )
+    return location + (" ".join(neighbors) if neighbors else "无额外相邻轮次。")
+
+
+def _verification_characters(
+    document: BH3TextDocument,
+    sample_turns: list[DialogueTurn],
+) -> list[str]:
+    speakers = {turn.speaker for turn in sample_turns if turn.speaker}
+    return sorted({*document.character_names, *speakers})
+
+
+def _verification_evidence_excerpt(sample_turns: list[DialogueTurn]) -> str:
+    return "\n".join(_render_turn(turn) for turn in sample_turns)
+
+
 def _verification_video_hint(
     document: BH3TextDocument,
     video_rows: list[dict[str, Any]],
@@ -1278,6 +1326,7 @@ def write_transcript_verification(
     for document in selected_documents:
         previous = previous_rows.get(document.document_id, {})
         video_id, part = _verification_video_hint(document, video_rows)
+        sample_turns = _sample_turns(document)
         output.append(
             BH3TextVerificationRecord(
                 verification_id=stable_id("bh3verify", document.document_id),
@@ -1286,10 +1335,14 @@ def write_transcript_verification(
                 arc=document.arc,
                 chapter=document.chapter,
                 source_url=document.source_url,
+                scene_context=_verification_context(document, sample_turns),
+                character_names=_verification_characters(document, sample_turns),
+                evidence_excerpt=_verification_evidence_excerpt(sample_turns),
+                confirmation_items=list(VERIFICATION_CONFIRMATION_ITEMS),
                 video_id=video_id,
                 suggested_video_part=part,
                 video_timestamp=str(previous.get("video_timestamp", "")),
-                sample_turns=_sample_turns(document),
+                sample_turns=sample_turns,
                 verification_status=str(
                     previous.get("verification_status", "not_checked")
                 ),  # type: ignore[arg-type]
@@ -1324,17 +1377,22 @@ def write_transcript_verification(
                 f"## {index}. {row.title}",
                 "",
                 f"- verification_id：{row.verification_id}",
-                f"- 篇章：{row.chapter}",
+                f"- 篇章：{row.arc}",
+                f"- 章节：{row.chapter}",
+                f"- 场景上下文：{row.scene_context}",
+                f"- 涉及角色：{'、'.join(row.character_names) or '无明确角色'}",
                 f"- BH3Text URL：{row.source_url}",
-                f"- 来源等级：{SOURCE_TIER}",
+                f"- 来源等级：{row.source_tier}",
                 f"- 对应B站视频BV号：{row.video_id or '待人工指定'}",
                 f"- 推荐核验分P：{row.suggested_video_part or '待人工选择'}",
                 f"- 视频时间点：{row.video_timestamp or '待填写'}",
                 f"- 核验结果：{row.verification_status}",
                 f"- mismatch_type：{row.mismatch_type}",
                 f"- 审核备注：{row.reviewer_note}",
-                "- 抽样台词：",
+                "- 证据片段（原顺序3～5轮）：",
                 turns,
+                "- 待确认项：",
+                *(f"  - [ ] {item}" for item in row.confirmation_items),
                 "",
             ]
         )
