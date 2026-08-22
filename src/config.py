@@ -92,6 +92,13 @@ class LoreRAGConfig:
     backend: str
     index_path: Path
     timeout_seconds: float
+    vector_backend: str = "hashed"
+    semantic_index_path: Path = (
+        PROJECT_ROOT / "data" / "lore_index" / "semantic_vectors.json"
+    )
+    embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    embedding_device: str = "cpu"
+    embedding_local_files_only: bool = True
 
 
 @dataclass(frozen=True)
@@ -131,6 +138,9 @@ def get_config() -> AppConfig:
     lore_backend = os.getenv("LORE_RAG_BACKEND", "hybrid").strip().lower()
     if lore_backend not in {"bm25", "vector", "hybrid"}:
         lore_backend = "hybrid"
+    lore_vector_backend = os.getenv("LORE_RAG_VECTOR_BACKEND", "hashed").strip().lower()
+    if lore_vector_backend not in {"hashed", "sentence-transformers"}:
+        lore_vector_backend = "hashed"
 
     return AppConfig(
         llm=LLMConfig(
@@ -209,6 +219,21 @@ def get_config() -> AppConfig:
             ),
             timeout_seconds=max(
                 0.05, min(10.0, float(os.getenv("LORE_RAG_TIMEOUT_SECONDS", "2.0")))
+            ),
+            vector_backend=lore_vector_backend,
+            semantic_index_path=PROJECT_ROOT
+            / os.getenv(
+                "LORE_RAG_SEMANTIC_INDEX_PATH",
+                "data/lore_index/semantic_vectors.json",
+            ),
+            embedding_model=os.getenv(
+                "LORE_RAG_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"
+            ).strip()
+            or "BAAI/bge-small-zh-v1.5",
+            embedding_device=os.getenv("LORE_RAG_EMBEDDING_DEVICE", "cpu").strip()
+            or "cpu",
+            embedding_local_files_only=_env_bool(
+                "LORE_RAG_EMBEDDING_LOCAL_FILES_ONLY", "true"
             ),
         ),
         memory_summarize_interval=summarize_interval,

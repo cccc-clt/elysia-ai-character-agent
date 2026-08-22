@@ -13,6 +13,7 @@ from typing import Iterable, Protocol
 from datetime import datetime, timezone
 
 from src.lore.corpus import LoreCorpus
+from src.lore.embeddings import EmbeddingBackend, normalized_vector
 from src.lore.models import LoreChunk, QueryRoute
 
 
@@ -253,6 +254,156 @@ class HashedVectorRetriever:
             if score > 0:
                 scores.append(RankedChunk(chunk=chunk, score=score))
         return sorted(scores, key=lambda row: (-row.score, row.chunk.chunk_id))[:top_k]
+
+
+class SemanticVectorIndex:
+    """Portable dense index created by a configured local embedding adapter."""
+
+    def __init__(
+        self,
+        *,
+        backend_name: str,
+        model_name: str,
+        dimensions: int,
+        signature: str,
+        vectors: dict[str, list[float]],
+        chunk_hashes: dict[str, str],
+    ) -> None:
+        self.backend_name = backend_name
+        self.model_name = model_name
+        self.dimensions = dimensions
+        self.signature = signature
+        self.vectors = vectors
+        self.chunk_hashes = chunk_hashes
+
+    @classmethod
+    def build(
+        cls,
+        chunks: list[LoreChunk],
+        backend: EmbeddingBackend,
+    ) -> "SemanticVectorIndex":
+        vectors = [
+            normalized_vector(vector)
+            for vector in backend.encode([_searchable_text(row) for row in chunks])
+        ]
+        if len(vectors) != len(chunks):
+            raise ValueError("semantic vector count does not match lore chunks")
+        dimensions = len(vectors[0]) if vectors else 0
+        if not dimensions or any(len(vector) != dimensions for vector in vectors):
+            raise ValueError("invalid semantic vector dimensions")
+        return cls(
+            backend_name=backend.name,
+            model_name=backend.model_name,
+            dimensions=dimensions,
+            signature=LoreCorpus.signature(chunks),
+            vectors={row.chunk_id: vector for row, vector in zip(chunks, vectors)},
+            chunk_hashes={row.chunk_id: _chunk_fingerprint(row) for row in chunks},
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> "SemanticVectorIndex":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("index_type") != "dense_semantic":
+            raise ValueError("unsupported lore semantic index")
+        vectors = {
+            str(chunk_id): [float(value) for value in vector]
+            for chunk_id, vector in payload.get("vectors", {}).items()
+        }
+        dimensions = int(payload.get("dimensions", 0))
+        if not dimensions or any(len(vector) != dimensions for vector in vectors.values()):
+            raise ValueError("invalid lore semantic index dimensions")
+        return cls(
+            backend_name=str(payload.get("embedding_backend", "")),
+            model_name=str(payload.get("model_name", "")),
+            dimensions=dimensions,
+            signature=str(payload.get("corpus_signature", "")),
+            vectors=vectors,
+            chunk_hashes={
+                str(chunk_id): str(digest)
+                for chunk_id, digest in payload.get("chunk_hashes", {}).items()
+            },
+        )
+
+    def write(
+        self,
+        path: Path,
+        *,
+        prototype_only: bool,
+        build_time_ms: float = 0.0,
+    ) -> dict[str, object]:
+        payload = {
+            "schema_version": 2,
+            "index_type": "dense_semantic",
+            "embedding_backend": self.backend_name,
+            "model_name": self.model_name,
+            "dimensions": self.dimensions,
+            "distance": "cosine",
+            "corpus_signature": self.signature,
+            "vector_count": len(self.vectors),
+            "prototype_only": prototype_only,
+            "production_enabled": False,
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "build_time_ms": round(build_time_ms, 3),
+            "chunk_hashes": dict(sorted(self.chunk_hashes.items())),
+            "vectors": {
+                chunk_id: vector
+                for chunk_id, vector in sorted(self.vectors.items())
+            },
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return {
+            key: value
+            for key, value in payload.items()
+            if key not in {"vectors", "chunk_hashes"}
+        }
+
+
+class SemanticVectorRetriever:
+    name = "semantic-vector"
+
+    def __init__(
+        self,
+        index: SemanticVectorIndex,
+        backend: EmbeddingBackend,
+    ) -> None:
+        self._index = index
+        self._backend = backend
+
+    def rank(
+        self, query: str, chunks: list[LoreChunk], *, top_k: int
+    ) -> list[RankedChunk]:
+        if (
+            self._index.backend_name != self._backend.name
+            or self._index.model_name != self._backend.model_name
+            or any(
+                self._index.chunk_hashes.get(row.chunk_id) != _chunk_fingerprint(row)
+                for row in chunks
+            )
+        ):
+            raise ValueError("lore semantic index is stale or uses another model")
+        encoded = self._backend.encode([query])
+        if not encoded or len(encoded[0]) != self._index.dimensions:
+            raise ValueError("semantic query vector dimensions do not match index")
+        query_vector = normalized_vector(encoded[0])
+        scores = [
+            RankedChunk(
+                chunk=row,
+                score=sum(
+                    left * right
+                    for left, right in zip(
+                        query_vector,
+                        self._index.vectors.get(row.chunk_id, []),
+                    )
+                ),
+            )
+            for row in chunks
+            if row.chunk_id in self._index.vectors
+        ]
+        return sorted(
+            (row for row in scores if row.score > 0),
+            key=lambda row: (-row.score, row.chunk.chunk_id),
+        )[:top_k]
 
 
 def reciprocal_rank_fusion(

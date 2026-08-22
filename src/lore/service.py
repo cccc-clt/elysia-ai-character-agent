@@ -10,6 +10,11 @@ from pathlib import Path
 
 from src.config import LoreRAGConfig
 from src.lore.corpus import LoreCorpus
+from src.lore.embeddings import (
+    EmbeddingBackend,
+    EmbeddingBackendUnavailable,
+    SentenceTransformerEmbeddingBackend,
+)
 from src.lore.models import (
     CorpusName,
     LoreAugmentation,
@@ -22,6 +27,8 @@ from src.lore.retrieval import (
     HashedVectorIndex,
     HashedVectorRetriever,
     RankedChunk,
+    SemanticVectorIndex,
+    SemanticVectorRetriever,
     reciprocal_rank_fusion,
 )
 
@@ -163,10 +170,33 @@ class LoreRAG:
         *,
         corpus: LoreCorpus | None = None,
         vector_index_path: Path | None = None,
+        embedding_backend: EmbeddingBackend | None = None,
     ) -> None:
         self._config = config
         self._corpus = corpus or LoreCorpus(config)
-        self._vector_index_path = vector_index_path or config.index_path
+        self._vector_index_path = vector_index_path or (
+            config.semantic_index_path
+            if config.vector_backend == "sentence-transformers"
+            else config.index_path
+        )
+        self._embedding_backend = embedding_backend
+
+    def _load_vector_retriever(
+        self,
+    ) -> HashedVectorRetriever | SemanticVectorRetriever:
+        if not self._vector_index_path.exists():
+            raise FileNotFoundError(self._vector_index_path.name)
+        if self._config.vector_backend == "sentence-transformers":
+            backend = self._embedding_backend or SentenceTransformerEmbeddingBackend(
+                self._config.embedding_model,
+                device=self._config.embedding_device,
+                local_files_only=self._config.embedding_local_files_only,
+            )
+            return SemanticVectorRetriever(
+                SemanticVectorIndex.load(self._vector_index_path),
+                backend,
+            )
+        return HashedVectorRetriever(HashedVectorIndex.load(self._vector_index_path))
 
     def retrieve(self, query: str) -> LoreAugmentation:
         if not self._config.enabled:
@@ -245,11 +275,7 @@ class LoreRAG:
         else:
             try:
                 stage_started = time.perf_counter()
-                if not self._vector_index_path.exists():
-                    raise FileNotFoundError(self._vector_index_path.name)
-                vector = HashedVectorRetriever(
-                    HashedVectorIndex.load(self._vector_index_path)
-                )
+                vector = self._load_vector_retriever()
                 vector_ranking = vector.rank(query, chunks, top_k=expanded_top_k)
                 timings["vector_ms"] = round(
                     (time.perf_counter() - stage_started) * 1000, 3
@@ -271,6 +297,14 @@ class LoreRAG:
                     timings["fusion_ms"] = round(
                         (time.perf_counter() - stage_started) * 1000, 3
                     )
+            except EmbeddingBackendUnavailable:
+                backend = "bm25_fallback"
+                degraded_reason = "semantic_model_unavailable"
+                stage_started = time.perf_counter()
+                ranking = bm25.rank(query, chunks, top_k=expanded_top_k)
+                timings["bm25_ms"] = round(
+                    (time.perf_counter() - stage_started) * 1000, 3
+                )
             except (OSError, ValueError, json.JSONDecodeError):
                 backend = "bm25_fallback"
                 degraded_reason = "vector_index_missing_stale_or_invalid"
