@@ -183,6 +183,13 @@ def test_hybrid_uses_explicit_local_vector_index(tmp_path: Path) -> None:
     assert result.backend == "hybrid"
     assert result.used is True
     assert result.results[0].corpus == "bh3text_dialogue"
+    assert {
+        "corpus_load_ms",
+        "bm25_ms",
+        "vector_ms",
+        "fusion_ms",
+        "rerank_and_context_ms",
+    } <= set(result.timings)
 
 
 def test_official_fact_route_prioritizes_tier_a_over_transcript(tmp_path: Path) -> None:

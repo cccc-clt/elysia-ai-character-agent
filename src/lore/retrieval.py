@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Iterable, Protocol
+from datetime import datetime, timezone
 
 from src.lore.corpus import LoreCorpus
 from src.lore.models import LoreChunk, QueryRoute
@@ -166,7 +167,13 @@ class HashedVectorIndex:
             },
         )
 
-    def write(self, path: Path, *, prototype_only: bool) -> dict[str, object]:
+    def write(
+        self,
+        path: Path,
+        *,
+        prototype_only: bool,
+        build_time_ms: float = 0.0,
+    ) -> dict[str, object]:
         payload = {
             "schema_version": 1,
             "model_name": HASHED_VECTOR_MODEL,
@@ -176,6 +183,8 @@ class HashedVectorIndex:
             "vector_count": len(self.vectors),
             "prototype_only": prototype_only,
             "production_enabled": False,
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "build_time_ms": round(build_time_ms, 3),
             "chunk_hashes": dict(sorted(self.chunk_hashes.items())),
             "vectors": {
                 chunk_id: {str(index): weight for index, weight in sorted(vector.items())}

@@ -50,10 +50,14 @@ def main() -> int:
         chunks, warnings = LoreCorpus(config).load(corpora)
         started = time.perf_counter()
         index = HashedVectorIndex.build(chunks)
-        metadata = index.write(config.index_path, prototype_only=True)
+        build_time_ms = (time.perf_counter() - started) * 1000
+        metadata = index.write(
+            config.index_path,
+            prototype_only=True,
+            build_time_ms=build_time_ms,
+        )
         payload = {
             **metadata,
-            "build_time_ms": round((time.perf_counter() - started) * 1000, 3),
             "index_size_bytes": config.index_path.stat().st_size,
             "warnings": warnings,
         }

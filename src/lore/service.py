@@ -202,7 +202,11 @@ class LoreRAG:
 
     def _retrieve_sync(self, query: str, route: QueryRoute) -> LoreAugmentation:
         started = time.perf_counter()
+        stage_started = started
         chunks, warnings = self._corpus.load(_corpora_for_route(route))
+        timings = {
+            "corpus_load_ms": round((time.perf_counter() - stage_started) * 1000, 3)
+        }
         if not chunks:
             return LoreAugmentation(
                 query=query,
@@ -219,30 +223,49 @@ class LoreRAG:
         degraded_reason = ""
         ranking: list[RankedChunk]
         if backend == "bm25":
+            stage_started = time.perf_counter()
             ranking = bm25.rank(query, chunks, top_k=expanded_top_k)
+            timings["bm25_ms"] = round(
+                (time.perf_counter() - stage_started) * 1000, 3
+            )
         else:
             try:
+                stage_started = time.perf_counter()
                 if not self._vector_index_path.exists():
                     raise FileNotFoundError(self._vector_index_path.name)
                 vector = HashedVectorRetriever(
                     HashedVectorIndex.load(self._vector_index_path)
                 )
                 vector_ranking = vector.rank(query, chunks, top_k=expanded_top_k)
+                timings["vector_ms"] = round(
+                    (time.perf_counter() - stage_started) * 1000, 3
+                )
                 if backend == "vector":
                     ranking = vector_ranking
                 else:
+                    stage_started = time.perf_counter()
+                    bm25_ranking = bm25.rank(query, chunks, top_k=expanded_top_k)
+                    timings["bm25_ms"] = round(
+                        (time.perf_counter() - stage_started) * 1000, 3
+                    )
+                    stage_started = time.perf_counter()
                     ranking = reciprocal_rank_fusion(
-                        [
-                            bm25.rank(query, chunks, top_k=expanded_top_k),
-                            vector_ranking,
-                        ],
+                        [bm25_ranking, vector_ranking],
                         route=route,
                         top_k=expanded_top_k,
+                    )
+                    timings["fusion_ms"] = round(
+                        (time.perf_counter() - stage_started) * 1000, 3
                     )
             except (OSError, ValueError, json.JSONDecodeError):
                 backend = "bm25_fallback"
                 degraded_reason = "vector_index_missing_stale_or_invalid"
+                stage_started = time.perf_counter()
                 ranking = bm25.rank(query, chunks, top_k=expanded_top_k)
+                timings["bm25_ms"] = round(
+                    (time.perf_counter() - stage_started) * 1000, 3
+                )
+        stage_started = time.perf_counter()
         ranking = _metadata_rerank(ranking, query, route)
         selected = _diversify_documents(ranking, top_k=self._config.top_k)
         results: list[LoreSearchResult] = []
@@ -298,6 +321,9 @@ class LoreRAG:
         context = ""
         if context_sections:
             context = CONTEXT_SAFETY_PREFIX + "\n\n" + "\n\n".join(context_sections)
+        timings["rerank_and_context_ms"] = round(
+            (time.perf_counter() - stage_started) * 1000, 3
+        )
         return LoreAugmentation(
             query=query,
             route=route,
@@ -309,4 +335,5 @@ class LoreRAG:
             degraded_reason=degraded_reason,
             enabled=True,
             warnings=tuple(warnings),
+            timings=timings,
         )

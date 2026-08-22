@@ -513,6 +513,7 @@ def _handle_user_message(
         "backend": lore_augmentation.backend,
         "result_count": len(lore_augmentation.results),
         "elapsed_ms": lore_augmentation.elapsed_ms,
+        "timings": lore_augmentation.timings,
         "degraded_reason": lore_augmentation.degraded_reason,
     }
 

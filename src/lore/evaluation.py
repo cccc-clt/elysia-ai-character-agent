@@ -112,6 +112,7 @@ def _run_one(
     duplicate_results = 0
     total_results = 0
     latencies: list[float] = []
+    stage_latencies: dict[str, list[float]] = {}
     answerable = [case for case in cases if not case.should_abstain]
     abstentions = [case for case in cases if case.should_abstain]
     for case in cases:
@@ -157,6 +158,8 @@ def _run_one(
         duplicate_results += max(0, len(urls) - len(set(urls)))
         total_results += len(urls)
         latencies.append(result.elapsed_ms)
+        for stage, value in result.timings.items():
+            stage_latencies.setdefault(stage, []).append(value)
         rows.append(
             {
                 "run": run_name,
@@ -166,6 +169,7 @@ def _run_one(
                 "backend": result.backend,
                 "elapsed_ms": result.elapsed_ms,
                 "degraded_reason": result.degraded_reason,
+                "timings": result.timings,
                 "should_abstain": case.should_abstain,
                 "gold_hits_at_5": sorted(gold.intersection(urls[:5])),
                 "retrieved": [
@@ -202,6 +206,11 @@ def _run_one(
         ),
         "latency_p50_ms": round(statistics.median(sorted_latency), 3) if sorted_latency else 0.0,
         "latency_p95_ms": round(sorted_latency[p95_index], 3) if sorted_latency else 0.0,
+        "cold_start_ms": round(latencies[0], 3) if latencies else 0.0,
+        "stage_latency_p50_ms": {
+            stage: round(statistics.median(values), 3)
+            for stage, values in sorted(stage_latencies.items())
+        },
     }
     return rows, metrics
 
@@ -303,6 +312,19 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
             "- `candidate_c_hybrid` 使用 BM25 + `hashed-char-ngram-v1` 稀疏向量 + RRF；该向量不是神经语义 embedding。",
             "- 评测通过只允许开发原型继续，不能绕过 `vector_readiness.json` 的人工核验门，也不能自动开启生产。",
             "- 每题详细命中保存在 Git ignored 的 `evals/lore_rag_results.jsonl`，不含剧情正文。",
+            "",
+            "## Hybrid stage latency (p50 ms)",
+            "",
+        ]
+    )
+    lines.extend(
+        f"- {stage}: {value}"
+        for stage, value in payload["metrics"]["candidate_c_hybrid"][
+            "stage_latency_p50_ms"
+        ].items()
+    )
+    lines.extend(
+        [
             "",
         ]
     )

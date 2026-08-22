@@ -65,6 +65,7 @@ class LoreAugmentation:
     degraded_reason: str = ""
     enabled: bool = False
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    timings: dict[str, float] = field(default_factory=dict)
 
     @property
     def used(self) -> bool:
