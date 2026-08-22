@@ -64,6 +64,7 @@ python -m data_pipeline.cli import-manual --input data/manual_official/inbox
 python -m data_pipeline.cli review-manual
 python -m data_pipeline.cli build-rag
 python -m data_pipeline.cli build-coverage
+python -m data_pipeline.cli build-source-inventory
 python -m data_pipeline.cli inspect-videos --seed-file data/video_sources/bilibili_seeds.txt
 python -m data_pipeline.cli process-video-subtitles
 python -m data_pipeline.cli build-video-review
@@ -98,8 +99,11 @@ python -m data_pipeline.cli status
 | `data/manifests/data_quality_report.md` | 采集、正文、chunk、实体和关系质量汇总 |
 | `data/manifests/lore_coverage_matrix.json` | 27 个核心主题的文档、chunk、关系与覆盖状态 |
 | `data/manifests/manual_source_gap.md` | 公开官方网页不足时的游戏内人工补录清单 |
+| `data/manifests/source_inventory.json` | 四类隔离语料的来源层级、数量与开发原型结构门 |
+| `data/manifests/deduplication_report.md` | 不含正文的hash去重、BH3Helper映射与结构验证报告 |
 | `data/manual_official/templates/` | 游戏内官方资料人工录入模板 |
 | `data/review/` | 实体、关系和人工资料审核工作台 |
+| `data/review/relation_conflicts.md` | official/BH3Text pending语义关系的冲突清单；证据边不参与 |
 | `data/video_sources/` | B 站待审元数据、字幕和独立视频审核空间 |
 | `data/manifests/bh3text_candidate_audit.jsonl` | BH3Text 限定目录发现的候选详情页审计 |
 | `data/cleaned/bh3text_dialogues.jsonl` | 本地解析的对话轮次；不提交 Git |
@@ -129,6 +133,8 @@ python -m data_pipeline.cli status
 人工记录必须填写 `summary`、`evidence` 和 `source_note`。`import-manual` 只校验并登记 `pending`，不会补写字段、移动文件或确认资料；只有人工将状态改为 `accepted` 并移动到 `data/manual_official/accepted/` 的记录才会进入 `build-rag`，其 `source_type=official_game_manual`、`source_tier=A-manual`，不会与网页来源错误合并。
 
 `build-coverage` 生成 JSON/Markdown 覆盖矩阵、实体/关系审核工作台；最低目标未满足时还会生成 `manual_source_gap.md`。每个主题分别显示 `official_coverage`、`bh3text_transcript_coverage` 和 `combined_coverage`。BH3Text 可以增加转录层及组合层的 direct/substantial evidence 和独立文档数，但不能增加独立官方文档、Tier A 文档或 confirmed 关系；视频元数据与 pending 关系同样不计入正式覆盖。
+
+`build-source-inventory` 只输出来源数量、层级、hash去重组和结构质量门，不复制剧情正文。它分别统计 `official_lore`、`bh3text_dialogue`、`story_navigation` 与视频证据，验证社区资料没有计入官方文档，并记录 `prototype_only=true`、`contains_unverified_transcripts=true`、`production_enabled=false`。结构门通过不等于人工转录核验通过。
 
 ## BH3Text 剧情文本边界
 

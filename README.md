@@ -87,6 +87,8 @@ BH3Helper 仅用作社区维护的剧情导航与来源发现索引，不视为�
 
 BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布的10场景人工核验门控制未来索引资格。`not_checked` 不会由程序自动升级；critical mismatch、核验数量不足或来源URL/fixture质量门任一失败时，`vector_ready` 必须保持 `false`。当前项目仍未接入该向量索引。
 
+V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、BH3Text剧情转录和BH3Helper导航保持三个隔离corpora，通过BM25与可选本地hashed-vector/RRF混合检索返回短证据和来源链接。它不写入用户长期记忆；未核验BH3Text默认不参与检索，人工质量门未通过前不视为正式能力。详见 [`docs/architecture/LORE_RAG_ARCHITECTURE.md`](docs/architecture/LORE_RAG_ARCHITECTURE.md)。
+
 ---
 
 ## 2. 功能特点
@@ -108,6 +110,7 @@ BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布
 | 回复反馈 | 喜欢 / 不像她 / 重新生成 / 记住这段 |
 | 实验室模式 | 集中展示模型配置、数据库状态、评估、分析与角色卡管理 |
 | 角色卡 | JSON 导入导出，可替换角色设定 |
+| Lore RAG（实验性） | 默认关闭；按官方设定、非官方托管剧情转录和剧情导航分层检索，保留引用并支持BM25降级 |
 
 > `STORAGE_BACKEND=json` 时，记忆确认、反馈、回忆等部分能力受限，页面会给出提示。
 
@@ -142,6 +145,7 @@ BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布
 | 评估分析 | `Evaluator`、`AnalyticsService` |
 | 语音片段 | `AudioClipService`（本地 `official_lines`） |
 | 配置加载 | python-dotenv / Streamlit Secrets |
+| Lore检索原型 | BM25 + 2048维hashed中文字符n-gram vector + RRF；无模型下载 |
 | 语言 | Python 3.10+ |
 
 ---
@@ -207,7 +211,10 @@ elysia-ai-character-agent/
 │   ├── audio_clip_service.py
 │   ├── evaluator.py
 │   ├── analytics_service.py
-│   └── ui.py                   # 页面与主题
+│   ├── ui.py                   # 页面与主题
+│   └── lore/                   # 隔离Lore检索、引用、安全过滤与本地索引CLI
+├── evals/
+│   └── lore_rag_cases.jsonl    # 40题固定检索评测集
 ├── data/                       # 运行时数据（已 gitignore）
 │   ├── elysia_companion.db     # SQLite，首次运行自动创建
 │   ├── audio_cache/            # TTS/STT 缓存
@@ -287,6 +294,29 @@ copy .env.example .env    # Windows
 | `TEMPERATURE` | 采样温度 | `0.9` |
 | `MAX_TOKENS` | 最大生成长度 | `1500` |
 | `MEMORY_SUMMARIZE_INTERVAL` | 每 N 轮触发记忆整理 | `6` |
+
+### Lore RAG 配置（实验性）
+
+| 变量 | 说明 | 安全默认值 |
+|---|---|---|
+| `LORE_RAG_ENABLED` | 是否在聊天中启用设定检索 | `false` |
+| `LORE_RAG_PROTOTYPE_MODE` | 标记开发原型运行 | `true` |
+| `LORE_RAG_ALLOW_UNVERIFIED_TRANSCRIPTS` | 是否允许未人工核验BH3Text进入原型检索 | `false` |
+| `LORE_RAG_REQUIRE_CITATIONS` | 回复末尾附短来源列表 | `true` |
+| `LORE_RAG_TOP_K` | 最大结果数，限制为1～10 | `5` |
+| `LORE_RAG_MAX_CONTEXT_CHARS` | 单轮检索上下文字符上限 | `6000` |
+| `LORE_RAG_BACKEND` | `bm25` / `vector` / `hybrid` | `hybrid` |
+| `LORE_RAG_INDEX_PATH` | Git ignored的本地索引路径 | `data/lore_index/hashed_vectors.json` |
+| `LORE_RAG_TIMEOUT_SECONDS` | 本地检索超时后回退原聊天 | `2.0` |
+
+显式构建本地开发索引与运行无付费评测：
+
+```bash
+python -m src.lore.cli build-index --include-unverified-transcripts
+python -m src.lore.evaluation
+```
+
+第一条命令只建立 `prototype_only` 本地索引，不会把 `vector_ready` 改为true，也不会自动打开应用feature flag。hashed vector是可复现的词法向量，不是神经语义embedding。
 
 ### 存储配置
 
@@ -543,6 +573,8 @@ SQLite 在云端可能因重启或实例回收而丢失，**适合 Demo，不适
 4. **SQLite** 面向单用户 Demo；多用户需 session 隔离与外置存储。  
 5. **角色一致性**由 LLM 评估，不能保证 100% 符合人设。  
 6. 生成内容由大模型产生，安全相关话题会尝试脱离角色设定进行提示。  
+7. **Lore RAG** 仍是默认关闭的开发原型；BH3Text 10场景均待人工核验，详细评测通过不等于剧情文本已验证。
+8. 本地索引依赖Git ignored的corpus；云部署前必须另行设计私密数据提供、持久化与冷启动方案。
 
 ---
 
