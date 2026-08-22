@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from src.config import PROJECT_ROOT, LoreRAGConfig, get_config
-from src.lore.corpus import is_safe_source_url
+from src.lore.corpus import LoreCorpus, is_safe_source_url
+from src.lore.embeddings import EmbeddingBackend
 from src.lore.models import LoreAugmentation
 from src.lore.service import INJECTION_PATTERNS, LoreRAG
 
@@ -223,6 +224,8 @@ def run_evaluation(
     results_path: Path = DEFAULT_RESULTS,
     report_path: Path = DEFAULT_REPORT,
     config: LoreRAGConfig | None = None,
+    corpus: LoreCorpus | None = None,
+    embedding_backend: EmbeddingBackend | None = None,
 ) -> dict[str, Any]:
     cases = load_cases(cases_path)
     distribution = validate_case_distribution(cases)
@@ -237,8 +240,15 @@ def run_evaluation(
     )
     runs = {
         "baseline_a_no_retrieval": None,
-        "baseline_b_bm25": LoreRAG(replace(prototype, backend="bm25")),
-        "candidate_c_hybrid": LoreRAG(replace(prototype, backend="hybrid")),
+        "baseline_b_bm25": LoreRAG(
+            replace(prototype, backend="bm25"),
+            corpus=corpus,
+        ),
+        "candidate_c_hybrid": LoreRAG(
+            replace(prototype, backend="hybrid"),
+            corpus=corpus,
+            embedding_backend=embedding_backend,
+        ),
     }
     all_rows: list[dict[str, Any]] = []
     metrics: dict[str, dict[str, Any]] = {}
@@ -260,6 +270,13 @@ def run_evaluation(
         "critical_prompt_injection_failures_zero": candidate["critical_prompt_injection_failures"] == 0,
     }
     payload = {
+        "evaluation_status": "completed",
+        "vector_backend": prototype.vector_backend,
+        "embedding_model": (
+            prototype.embedding_model
+            if prototype.vector_backend == "sentence-transformers"
+            else "hashed-char-ngram-v1"
+        ),
         "case_distribution": distribution,
         "metrics": metrics,
         "prototype_quality_gate": gate,
@@ -311,7 +328,13 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
             "## Interpretation",
             "",
             "- `baseline_a_no_retrieval` 仅用于显示无检索时的检索指标下界，不代表答案质量评测。",
-            "- `candidate_c_hybrid` 使用 BM25 + `hashed-char-ngram-v1` 稀疏向量 + RRF；该向量不是神经语义 embedding。",
+            (
+                f"- `candidate_c_hybrid` 使用 BM25 + `{payload['embedding_model']}` "
+                "dense semantic embedding + RRF。"
+                if payload["vector_backend"] == "sentence-transformers"
+                else "- `candidate_c_hybrid` 使用 BM25 + `hashed-char-ngram-v1` "
+                "稀疏向量 + RRF；该向量不是神经语义 embedding。"
+            ),
             "- 评测通过只允许开发原型继续，不能绕过 `vector_readiness.json` 的人工核验门，也不能自动开启生产。",
             "- 每题详细命中保存在 Git ignored 的 `evals/lore_rag_results.jsonl`，不含剧情正文。",
             "",

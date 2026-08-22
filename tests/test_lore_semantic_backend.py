@@ -15,6 +15,7 @@ from src.lore.embeddings import (
 )
 from src.lore.models import LoreChunk
 from src.lore.retrieval import SemanticVectorIndex, SemanticVectorRetriever
+from src.lore.semantic_evaluation import _safe_model_name, run_offline_semantic_evaluation
 from src.lore.service import LoreRAG
 
 
@@ -146,6 +147,15 @@ def test_semantic_cli_accepts_an_explicit_local_model_path() -> None:
     assert args.vector_backend == "sentence-transformers"
     assert args.embedding_model == "local/chinese-model"
 
+    eval_args = build_parser().parse_args(
+        ["evaluate-semantic", "--embedding-model", "local/chinese-model"]
+    )
+    assert eval_args.command == "evaluate-semantic"
+    assert eval_args.embedding_model == "local/chinese-model"
+    assert _safe_model_name(str(Path("C:/private/models/bge").resolve())) == (
+        "<local-model-path>"
+    )
+
 
 def test_sentence_transformer_adapter_reports_missing_local_model() -> None:
     def factory(model_name: str, **kwargs):
@@ -257,3 +267,59 @@ def test_semantic_index_model_mismatch_falls_back_without_loading_model(
     ).retrieve("爱莉希雅是谁")
     assert result.backend == "bm25_fallback"
     assert result.degraded_reason == "vector_index_missing_stale_or_invalid"
+
+
+def test_offline_semantic_evaluation_records_missing_model_without_metrics(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    summary_path = tmp_path / "summary.json"
+    report_path = tmp_path / "report.md"
+    readiness_path = tmp_path / "readiness.json"
+    readiness_path.write_text(
+        '{"vector_ready": false, "actual": {"reviewed_scenes": 0, '
+        '"matches": 0, "critical_mismatches": 0}}',
+        encoding="utf-8",
+    )
+    payload = run_offline_semantic_evaluation(
+        config=config,
+        corpus=StaticCorpus(_chunks()),  # type: ignore[arg-type]
+        embedding_backend=MissingEmbeddingBackend(),
+        summary_path=summary_path,
+        results_path=tmp_path / "results.jsonl",
+        report_path=report_path,
+        vector_readiness_path=readiness_path,
+    )
+    assert payload["evaluation_status"] == "blocked_local_model_missing"
+    assert payload["semantic_metrics"] is None
+    assert payload["semantic_index_created"] is False
+    assert payload["paid_api_calls"] == 0
+    assert payload["human_review_gate"]["vector_ready"] is False
+    assert not config.semantic_index_path.exists()
+    report = report_path.read_text(encoding="utf-8")
+    assert "Not verified" in report
+    assert "未下载模型" in report
+
+
+def test_offline_semantic_evaluation_runs_fixed_cases_with_injected_backend(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    payload = run_offline_semantic_evaluation(
+        config=config,
+        corpus=StaticCorpus(_chunks()),  # type: ignore[arg-type]
+        embedding_backend=DeterministicEmbeddingBackend(),
+        summary_path=tmp_path / "summary.json",
+        results_path=tmp_path / "results.jsonl",
+        report_path=tmp_path / "report.md",
+        vector_readiness_path=tmp_path / "missing-readiness.json",
+    )
+    assert payload["evaluation_status"] == "completed"
+    assert payload["semantic_index_created"] is True
+    assert payload["semantic_metrics"]["cases"] == 40
+    assert payload["human_review_gate"]["vector_ready"] is False
+    assert payload["production_enabled"] is False
+    assert config.semantic_index_path.exists()
+    assert "dense semantic embedding" in (tmp_path / "report.md").read_text(
+        encoding="utf-8"
+    )

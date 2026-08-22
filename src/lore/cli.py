@@ -18,6 +18,7 @@ from src.lore.models import CorpusName
 from src.lore.retrieval import HashedVectorIndex, SemanticVectorIndex
 from src.lore.service import LoreRAG
 from src.lore.review import build_retrieval_match_review
+from src.lore.semantic_evaluation import run_offline_semantic_evaluation
 
 
 def _prototype_config(
@@ -75,12 +76,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="build the 8-case retrieval match review workbench",
     )
     review.add_argument("--include-unverified-transcripts", action="store_true")
+    semantic_eval = subparsers.add_parser(
+        "evaluate-semantic",
+        help="run the 40-case local-only semantic retrieval evaluation",
+    )
+    semantic_eval.add_argument(
+        "--embedding-model",
+        help="local sentence-transformers model name or path",
+    )
     subparsers.add_parser("status")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    exit_code = 0
     config = _prototype_config(
         include_unverified=getattr(args, "include_unverified_transcripts", False),
         vector_backend=getattr(args, "vector_backend", None),
@@ -154,6 +164,10 @@ def main() -> int:
         }
     elif args.command == "build-review":
         payload = build_retrieval_match_review(LoreRAG(config))
+    elif args.command == "evaluate-semantic":
+        payload = run_offline_semantic_evaluation(config=config)
+        if payload["evaluation_status"] != "completed":
+            exit_code = 2
     else:
         payload = {
             "hashed_index_exists": config.index_path.exists(),
@@ -167,7 +181,7 @@ def main() -> int:
             "production_enabled": False,
         }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":
