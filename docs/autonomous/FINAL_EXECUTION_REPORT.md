@@ -1,5 +1,7 @@
 # Elysia V2 Autonomous Execution Report
 
+> Historical first-round report. The current second-round result is recorded in `docs/autonomous/SECOND_STABILIZATION_REPORT.md`; first-round numbers below are retained as historical evidence.
+
 ## Outcome
 
 本次自治执行完成了文件所列 A–L 中所有无需用户本人判断、无需外部账号且不涉及正式部署的工作。

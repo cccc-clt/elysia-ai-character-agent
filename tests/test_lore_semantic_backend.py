@@ -320,6 +320,7 @@ def test_offline_semantic_evaluation_runs_fixed_cases_with_injected_backend(
     assert payload["human_review_gate"]["vector_ready"] is False
     assert payload["production_enabled"] is False
     assert config.semantic_index_path.exists()
-    assert "dense semantic embedding" in (tmp_path / "report.md").read_text(
-        encoding="utf-8"
-    )
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "dense semantic embedding" in report
+    assert "evaluation_status: `completed`" in report
+    assert "human transcript verification: `Blocked for human review`" in report

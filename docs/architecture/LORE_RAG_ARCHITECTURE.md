@@ -12,9 +12,10 @@
 
 - `BM25Retriever`：中文字符2/3-gram关键词基线；
 - `HashedVectorRetriever`：本地2048维稀疏hashed n-gram cosine adapter；
+- `SemanticVectorRetriever`：通过 `EmbeddingBackend` protocol 接收可替换的dense向量；当前实现是惰性加载、默认禁止下载的 `SentenceTransformerEmbeddingBackend`；
 - `reciprocal_rank_fusion`：对两个 adapters 的结果做RRF，并按查询类型执行来源角色重排。
 
-hashed vector 是可复现的本地词法向量，不是神经语义 embedding，不能宣称具备通用语义理解。
+外部仍只有 `LoreRAG.retrieve(query)`。`LORE_RAG_VECTOR_BACKEND` 在内部选择hashed或sentence-transformers adapter；BM25、RRF、引用和降级路径不变。hashed vector 是可复现的本地词法向量，不是神经语义 embedding。sentence-transformers adapter支持真实中文dense embedding，但当前默认BGE模型未安装，质量仍是 `Not verified`。
 
 ## Data and request flow
 
@@ -27,7 +28,7 @@ flowchart TD
     R -->|official fact| O[official_lore first]
     R -->|dialogue / plot| B[bh3text_dialogue first]
     R -->|viewing order| N[story_navigation only]
-    O --> X[BM25 / vector adapters]
+    O --> X[BM25 + selected vector adapter]
     B --> X
     N --> X
     X --> H[RRF + title/source rerank]
@@ -36,7 +37,7 @@ flowchart TD
     L --> P[Prompt lore layer]
     P --> A[LLM answer]
     A --> U[Short source list]
-    X -->|missing/stale index| M[BM25 fallback]
+    X -->|missing/stale index or model unavailable| M[BM25 fallback]
     X -->|timeout/corpus missing| C
 ```
 
@@ -63,6 +64,11 @@ LORE_RAG_MAX_CONTEXT_CHARS=6000
 LORE_RAG_BACKEND=hybrid
 LORE_RAG_INDEX_PATH=data/lore_index/hashed_vectors.json
 LORE_RAG_TIMEOUT_SECONDS=2.0
+LORE_RAG_VECTOR_BACKEND=hashed
+LORE_RAG_SEMANTIC_INDEX_PATH=data/lore_index/semantic_vectors.json
+LORE_RAG_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+LORE_RAG_EMBEDDING_DEVICE=cpu
+LORE_RAG_EMBEDDING_LOCAL_FILES_ONLY=true
 ```
 
 未核验BH3Text只有在 `PROTOTYPE_MODE=true` 且 `ALLOW_UNVERIFIED_TRANSCRIPTS=true` 时才可进入本地开发检索。`vector_readiness=false` 不会被索引数量或评测结果自动改写。
@@ -83,6 +89,7 @@ Lore corpus只由 `LoreCorpus` 从专用运行文件读取。`MemoryService` 没
 - 查询不是Lore：不读取corpus；
 - 未核验转录未授权：只使用允许的官方/导航层；
 - 索引缺失、过期或损坏：降级BM25；
+- 本地semantic模型缺失或embedding执行失败：标记 `semantic_model_unavailable` 并降级BM25；
 - corpus缺失或检索超时：不阻断聊天，返回原流程；
 - 无安全URL：结果不进入上下文。
 
@@ -90,5 +97,12 @@ Lore corpus只由 `LoreCorpus` 从专用运行文件读取。`MemoryService` 没
 
 - 40题检索评测：`evals/lore_rag_cases.jsonl`；
 - 结果报告：`docs/evals/LORE_RAG_EVALUATION_REPORT.md`；
-- 单元与安全测试：`tests/test_lore_rag.py`、`tests/test_lore_evaluation.py`；
+- semantic离线评测状态：`evals/lore_semantic_evaluation.json` 与 `docs/evals/LORE_SEMANTIC_BACKEND_EVALUATION.md`；
+- 单元与安全测试：`tests/test_lore_rag.py`、`tests/test_lore_evaluation.py`、`tests/test_lore_semantic_backend.py`；
 - 来源/去重运行报告：`data/manifests/source_inventory.json`、`deduplication_report.md`（Git ignored）。
+
+## Semantic index lifecycle
+
+语义依赖保存在独立的 `requirements-semantic.txt`，不会增加默认安装路径。建索引命令必须显式选择 `--vector-backend sentence-transformers`。模型由adapter惰性加载；`local_files_only=true` 时不会访问模型仓库。dense JSON索引记录backend、模型名、维度、cosine距离、corpus signature和逐chunk metadata hash，并继续位于Git ignored的 `data/lore_index/`。
+
+语义索引即使构建和40例评测通过，也只代表 `Prototype only`，不会修改 `vector_readiness.json`、人工核验状态或 `LORE_RAG_ENABLED=false`。

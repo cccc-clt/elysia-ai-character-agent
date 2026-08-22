@@ -2,6 +2,14 @@
 
 > 本报告来自确定性本地检索评测；没有调用LLM judge或付费API。BH3Text结果仍是未人工核验的社区托管转录。
 
+## Evaluation status
+
+- evaluation_status: `completed`
+- vector_backend: `hashed`
+- embedding_model: `hashed-char-ngram-v1`
+- capability_status: `Prototype only`
+- human transcript verification: `Blocked for human review`
+
 ## Case distribution
 
 - 身份与别名: 6
@@ -18,8 +26,8 @@
 | Run | R@1 | R@3 | R@5 | MRR | nDCG@5 | Citation | Tier | No-answer | p50 ms | p95 ms | Duplicate |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | baseline_a_no_retrieval | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.0% | 0.0% | 100.0% | 0.0 | 0.0 | 0.000 |
-| baseline_b_bm25 | 0.644 | 0.887 | 0.896 | 0.811 | 0.869 | 100.0% | 100.0% | 100.0% | 265.9 | 287.1 | 0.027 |
-| candidate_c_hybrid | 0.671 | 0.914 | 0.950 | 0.834 | 0.876 | 100.0% | 100.0% | 100.0% | 607.2 | 643.2 | 0.011 |
+| baseline_b_bm25 | 0.725 | 0.982 | 0.991 | 0.892 | 0.917 | 100.0% | 100.0% | 100.0% | 153.8 | 185.9 | 0.000 |
+| candidate_c_hybrid | 0.779 | 0.982 | 0.991 | 0.910 | 0.928 | 100.0% | 100.0% | 100.0% | 464.7 | 583.9 | 0.000 |
 
 ## Prototype quality gate
 
@@ -39,8 +47,8 @@
 
 ## Hybrid stage latency (p50 ms)
 
-- bm25_ms: 254.913
-- corpus_load_ms: 0.021
-- fusion_ms: 0.17
-- rerank_and_context_ms: 1.609
-- vector_ms: 351.705
+- bm25_ms: 181.415
+- corpus_load_ms: 0.013
+- fusion_ms: 0.185
+- rerank_and_context_ms: 1.402
+- vector_ms: 280.274

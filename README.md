@@ -87,7 +87,7 @@ BH3Helper 仅用作社区维护的剧情导航与来源发现索引，不视为�
 
 BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布的10场景人工核验门控制未来索引资格。`not_checked` 不会由程序自动升级；critical mismatch、核验数量不足或来源URL/fixture质量门任一失败时，`vector_ready` 必须保持 `false`。当前项目仍未接入该向量索引。
 
-V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、BH3Text剧情转录和BH3Helper导航保持三个隔离corpora，通过BM25与可选本地hashed-vector/RRF混合检索返回短证据和来源链接。它不写入用户长期记忆；未核验BH3Text默认不参与检索，人工质量门未通过前不视为正式能力。详见 [`docs/architecture/LORE_RAG_ARCHITECTURE.md`](docs/architecture/LORE_RAG_ARCHITECTURE.md)。
+V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、BH3Text剧情转录和BH3Helper导航保持三个隔离corpora，通过BM25与可替换的hashed-vector或本地中文semantic-vector adapter，经RRF返回短证据和来源链接。它不写入用户长期记忆；未核验BH3Text默认不参与检索，人工质量门未通过前不视为正式能力。语义模型不会自动下载，模型/索引缺失时回退BM25。详见 [`docs/architecture/LORE_RAG_ARCHITECTURE.md`](docs/architecture/LORE_RAG_ARCHITECTURE.md)。
 
 ---
 
@@ -145,7 +145,7 @@ V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、B
 | 评估分析 | `Evaluator`、`AnalyticsService` |
 | 语音片段 | `AudioClipService`（本地 `official_lines`） |
 | 配置加载 | python-dotenv / Streamlit Secrets |
-| Lore检索原型 | BM25 + 2048维hashed中文字符n-gram vector + RRF；无模型下载 |
+| Lore检索原型 | BM25 + RRF；默认2048维hashed字符向量，可替换本地sentence-transformers中文semantic embedding |
 | 语言 | Python 3.10+ |
 
 ---
@@ -192,6 +192,7 @@ Streamlit UI (src/ui.py)
 elysia-ai-character-agent/
 ├── app.py                      # Streamlit 入口
 ├── requirements.txt            # Python 依赖（含可选语音包说明）
+├── requirements-semantic.txt   # 可选本地语义检索依赖；默认流程不安装
 ├── .env.example                # 环境变量模板（仅占位符）
 ├── assets/
 │   ├── images/                 # 本地立绘/头像（可选，大文件不入库）
@@ -308,15 +309,31 @@ copy .env.example .env    # Windows
 | `LORE_RAG_BACKEND` | `bm25` / `vector` / `hybrid` | `hybrid` |
 | `LORE_RAG_INDEX_PATH` | Git ignored的本地索引路径 | `data/lore_index/hashed_vectors.json` |
 | `LORE_RAG_TIMEOUT_SECONDS` | 本地检索超时后回退原聊天 | `2.0` |
+| `LORE_RAG_VECTOR_BACKEND` | `hashed` / `sentence-transformers` | `hashed` |
+| `LORE_RAG_SEMANTIC_INDEX_PATH` | Git ignored的本地dense索引路径 | `data/lore_index/semantic_vectors.json` |
+| `LORE_RAG_EMBEDDING_MODEL` | 本地中文sentence-transformers模型名或路径 | `BAAI/bge-small-zh-v1.5` |
+| `LORE_RAG_EMBEDDING_DEVICE` | 本地推理设备 | `cpu` |
+| `LORE_RAG_EMBEDDING_LOCAL_FILES_ONLY` | 禁止隐式联网下载模型 | `true` |
 
 显式构建本地开发索引与运行无付费评测：
 
 ```bash
 python -m src.lore.cli build-index --include-unverified-transcripts
 python -m src.lore.evaluation
+python -m src.lore.cli build-review --include-unverified-transcripts
 ```
 
-第一条命令只建立 `prototype_only` 本地索引，不会把 `vector_ready` 改为true，也不会自动打开应用feature flag。hashed vector是可复现的词法向量，不是神经语义embedding。
+第一条命令只建立 `prototype_only` 本地hashed索引，不会把 `vector_ready` 改为true，也不会自动打开应用feature flag。hashed vector是可复现的词法向量，不是神经语义embedding。第三条命令生成8案例人工检索审核表到Git ignored的 `data/review/`。
+
+可选的真实中文语义后端必须由用户显式安装，并且默认只读取本地模型：
+
+```bash
+pip install -r requirements-semantic.txt
+python -m src.lore.cli build-index --include-unverified-transcripts --vector-backend sentence-transformers
+python -m src.lore.cli evaluate-semantic
+```
+
+`evaluate-semantic` 固定执行40例离线评测；本地没有模型时以非零状态写出 `blocked_local_model_missing`，不填写语义质量指标、不下载模型，也不影响hashed/BM25路径。当前实测状态见 [`docs/evals/LORE_SEMANTIC_BACKEND_EVALUATION.md`](docs/evals/LORE_SEMANTIC_BACKEND_EVALUATION.md)。无论离线指标如何，BH3Text的10场景人工核验门仍独立生效。
 
 ### 存储配置
 
