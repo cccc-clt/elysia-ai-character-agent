@@ -1,0 +1,143 @@
+version: 1
+sources:
+  - source_id: official-characters
+    label: 崩坏3官网角色页
+    tier: A
+    source_type: official_site
+    base_urls:
+      - https://www.bh3.com/valkyries
+    discovery_urls:
+      - https://www.bh3.com/valkyries
+    enabled: true
+    automated_collection: true
+    rag_allowed: true
+    content_policy: 仅角色名称、官方简介、身份描述和角色页URL；排除技能、倍率、装备与补给。
+
+  - source_id: official-news
+    label: 崩坏3官网历史资讯
+    tier: A
+    source_type: official_site
+    base_urls:
+      - https://www.bh3.com/news/
+      - https://www.bh3.com/content/
+      - https://www.bh3.com/information/
+    discovery_urls:
+      - https://www.bh3.com/news/
+    enabled: true
+    automated_collection: true
+    rag_allowed: true
+    content_policy: 允许角色介绍与版本剧情介绍；删除补给规则、概率、技能倍率和战斗数值。
+
+  - source_id: official-wiki
+    label: 圣芙蕾雅档案馆
+    tier: A
+    source_type: official_wiki
+    base_urls:
+      - https://baike.mihoyo.com/bh3/
+    discovery_urls:
+      - https://baike.mihoyo.com/bh3/wiki/channel/map/17/59?bbs_presentation_style=no_header
+    enabled: true
+    automated_collection: true
+    rag_allowed: true
+    content_policy: 只跟随公开搜索、栏目、分页和详情链接；栏目、评论、玩法数值不得进入RAG。
+
+  - source_id: official-comics
+    label: 崩坏3官方漫画站
+    tier: A
+    source_type: official_comic
+    base_urls:
+      - https://comic.bh3.com/
+    discovery_urls:
+      - https://comic.bh3.com/book
+    enabled: true
+    automated_collection: true
+    rag_allowed: false
+    content_policy: 只保存书目、章节、公开简介和URL；不采集图片，只有标题的章节不进入RAG。
+
+  - source_id: official-game-manual
+    label: 游戏内官方资料人工整理
+    tier: A-manual
+    source_type: official_game_manual
+    base_urls: []
+    discovery_urls: []
+    enabled: true
+    automated_collection: false
+    rag_allowed: true
+    content_policy: 必须人工填写来源说明、摘要和证据；审核为accepted后才可进入RAG。
+
+  - source_id: community-wiki
+    label: 社区Wiki补充资料
+    tier: B
+    source_type: community_supplement
+    base_urls: []
+    discovery_urls: []
+    enabled: false
+    automated_collection: false
+    rag_allowed: false
+    content_policy: 本阶段禁用；未来启用时必须标注社区补充，不得覆盖Tier A事实。
+
+  - source_id: encyclopedia
+    label: 百科补充资料
+    tier: B
+    source_type: community_supplement
+    base_urls: []
+    discovery_urls: []
+    enabled: false
+    automated_collection: false
+    rag_allowed: false
+    content_policy: 本阶段禁用；不得与官方设定混合显示。
+
+  - source_id: player-lore-guides
+    label: 玩家剧情整理
+    tier: B
+    source_type: community_supplement
+    base_urls: []
+    discovery_urls: []
+    enabled: false
+    automated_collection: false
+    rag_allowed: false
+    content_policy: 本阶段禁用；不得自动采集或作为官方事实。
+
+  - source_id: bh3text
+    label: BH3Text 游戏文本存档
+    domain: www.bh3text.com
+    tier: Tier B-primary-transcript
+    source_type: community_game_text_archive
+    content_origin: game_dialogue_archive
+    official_host: false
+    direct_game_text_claimed: true
+    requires_sample_verification: true
+    can_enter_supplemental_rag: true
+    can_override_tier_a: false
+    can_generate_confirmed_relations: false
+    copyright_owner: miHoYo
+    base_urls:
+      - https://www.bh3text.com/dialog/
+    discovery_urls:
+      - https://www.bh3text.com/dialog/
+    enabled: true
+    automated_collection: true
+    rag_allowed: false
+    content_policy: 仅按目录发现并采集指定往世乐土篇章与主线29—31章的公开详情页；栏目页不进入RAG，全文仅本地保存，所有设定关系保持pending并要求官方佐证。
+
+  - source_id: bh3helper
+    label: 崩坏3剧情助手
+    domain: bh3helper.xrysnow.xyz
+    tier: Tier B-curated-index
+    source_type: community_story_guide
+    source_role: discovery_and_story_navigation
+    official_host: false
+    contains_curator_annotations: true
+    contains_official_outbound_links: true
+    can_enter_main_lore_rag: false
+    can_enter_navigation_index: true
+    can_generate_confirmed_relations: false
+    can_override_tier_a: false
+    base_urls:
+      - https://bh3helper.xrysnow.xyz/
+    discovery_urls:
+      - https://bh3helper.xrysnow.xyz/
+    enabled: true
+    automated_collection: true
+    rag_allowed: false
+    content_policy: 仅跟随首页或已纳入页面公开提供的爱莉希雅项目相关链接；只保存导航元数据、待核验外链、档案候选和社区注释，不保存或索引嵌入剧情正文。

@@ -1,0 +1,94 @@
+"""Human review tables for pending entities, relations, and alias suggestions."""
+
+from __future__ import annotations
+
+from data_pipeline.config import PipelinePaths
+from data_pipeline.schemas import LoreEntity, LoreRelation
+from data_pipeline.utils import read_jsonl
+
+
+def _short(text: str, limit: int = 100) -> str:
+    value = " ".join(text.split()).replace("|", "\\|")
+    return value[:limit] + ("…" if len(value) > limit else "")
+
+
+def build_review_workbench(paths: PipelinePaths | None = None) -> dict[str, int]:
+    paths = paths or PipelinePaths()
+    paths.ensure_runtime_dirs()
+    entities: list[LoreEntity] = []
+    for row in read_jsonl(paths.entities):
+        try:
+            entities.append(LoreEntity.model_validate(row))
+        except ValueError:
+            continue
+    relations: list[LoreRelation] = []
+    for row in read_jsonl(paths.relations_pending):
+        try:
+            relations.append(LoreRelation.model_validate(row))
+        except ValueError:
+            continue
+
+    entity_lines = [
+        "# 实体人工审核工作台",
+        "",
+        "> 本文件只提供建议，不会自动确认、拒绝或合并实体。",
+        "",
+        "| 实体名称 | 类型 | 别名 | 出现次数 | 来源页面 | 短证据 | 建议操作 | accept/reject/merge |",
+        "|---|---|---|---:|---|---|---|---|",
+    ]
+    for entity in entities:
+        source = "<br>".join(entity.source_urls[:3])
+        evidence = _short(entity.evidence_snippets[0]) if entity.evidence_snippets else ""
+        suggestion = "核对身份与证据后 accept 或 reject"
+        if entity.name == "爱莉希雅":
+            suggestion = "检查下方装甲/身份别名建议，禁止直接自动 merge"
+        entity_lines.append(
+            f"| {entity.name} | {entity.entity_type} | {'、'.join(entity.aliases)} | "
+            f"{entity.mention_count} | {source} | {evidence} | {suggestion} | 待填写 |"
+        )
+    if not entities:
+        entity_lines.append("| - | - | - | 0 | - | - | 无实体候选 | - |")
+    entity_lines.extend(
+        [
+            "",
+            "## 别名/身份合并建议（仅供人工判断）",
+            "",
+            "| 基础名称 | 候选名称 | 可能关系 | 必须人工确认的问题 | 自动执行 |",
+            "|---|---|---|---|---|",
+            "| 爱莉希雅 | 真我·人之律者 | 可能为同一角色的不同装甲或剧情身份 | "
+            "是别名、装甲、律者身份还是应保留独立实体？ | 否 |",
+            "| 爱莉希雅 | 粉色妖精小姐♪ | 可能为同一角色的装甲名称 | "
+            "是否只作为装甲别名，是否涉及不同剧情阶段？ | 否 |",
+            "",
+            "身份、装甲、记忆体和不同剧情阶段在人工确认前不得合并。",
+        ]
+    )
+    paths.entities_review.write_text(
+        "\n".join(entity_lines) + "\n", encoding="utf-8"
+    )
+
+    relation_lines = [
+        "# 关系人工审核工作台",
+        "",
+        "> 同页共现不构成关系。所有候选仍为 pending，必须打开来源核对原文。",
+        "",
+        "| 来源实体 | 关系 | 目标实体 | time_scope | universe | confidence | 短证据 | 来源 | accept/reject |",
+        "|---|---|---|---|---|---:|---|---|---|",
+    ]
+    for relation in relations:
+        relation_lines.append(
+            f"| {relation.source_entity} | {relation.relation} | "
+            f"{relation.target_entity} | {relation.time_scope} | "
+            f"{relation.universe} | {relation.confidence} | "
+            f"{_short(relation.evidence)} | {relation.source_url} | 待填写 |"
+        )
+    if not relations:
+        relation_lines.append("| - | - | - | - | - | 0 | 无明确关系句 | - | - |")
+    paths.relations_review.write_text(
+        "\n".join(relation_lines) + "\n", encoding="utf-8"
+    )
+    return {
+        "pending_entities": len(entities),
+        "pending_relations": len(relations),
+        "alias_merge_suggestions": 2,
+    }
