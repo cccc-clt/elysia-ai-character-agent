@@ -30,6 +30,7 @@ class LoreEvalCase:
     expected_source_tier: str
     gold_source_urls: tuple[str, ...]
     should_abstain: bool
+    expected_answer: str = ""
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> "LoreEvalCase":
@@ -42,6 +43,7 @@ class LoreEvalCase:
             expected_source_tier=str(row["expected_source_tier"]),
             gold_source_urls=tuple(str(value) for value in row["gold_source_urls"]),
             should_abstain=bool(row["should_abstain"]),
+            expected_answer=str(row.get("expected_answer", "")),
         )
 
 

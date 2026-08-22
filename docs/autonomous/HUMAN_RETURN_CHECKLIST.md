@@ -10,6 +10,7 @@
 - [ ] 决定是否允许正式启用未核验社区转录。
 - [ ] 审阅向量后端ADR和部署持久化限制。
 - [ ] 审阅RAG评测报告及失败样本。
+- [ ] 审阅8案例检索匹配表，填写人工相关性、引用完整性与错误原因。
 - [ ] 决定是否打开 `LORE_RAG_ENABLED`。
 - [ ] 决定是否push、创建PR或部署。
 
@@ -21,6 +22,8 @@
 - `data/review/bh3text_transcript_verification.md`：逐场人工核验包。
 
 每个场景均包含篇章、章节、场景上下文、角色、BH3Text原始URL、3～5轮短证据和5项待确认内容。两份文件包含未核验剧情片段，因此继续保持Git ignored；本清单只提交任务状态和定位信息。
+
+8案例检索审核材料由 `python -m src.lore.cli build-review --include-unverified-transcripts` 生成到 `data/review/lore_retrieval_match_review.jsonl` 和 `.md`。表中自动字段只表示gold URL、来源等级和引用链接的确定性对照；人工相关性、人工错误原因和总审核状态不会由程序填写。
 
 ## Current 10-scene verification queue
 

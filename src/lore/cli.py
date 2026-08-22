@@ -12,6 +12,7 @@ from src.lore.corpus import LoreCorpus
 from src.lore.models import CorpusName
 from src.lore.retrieval import HashedVectorIndex
 from src.lore.service import LoreRAG
+from src.lore.review import build_retrieval_match_review
 
 
 def _prototype_config(*, include_unverified: bool):
@@ -32,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
     search = subparsers.add_parser("search")
     search.add_argument("query")
     search.add_argument("--include-unverified-transcripts", action="store_true")
+    review = subparsers.add_parser(
+        "build-review",
+        help="build the 8-case retrieval match review workbench",
+    )
+    review.add_argument("--include-unverified-transcripts", action="store_true")
     subparsers.add_parser("status")
     return parser
 
@@ -80,6 +86,8 @@ def main() -> int:
                 for row in result.results
             ],
         }
+    elif args.command == "build-review":
+        payload = build_retrieval_match_review(LoreRAG(config))
     else:
         payload = {
             "index_exists": config.index_path.exists(),

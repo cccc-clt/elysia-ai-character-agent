@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from src.lore.corpus import is_safe_source_url
 from src.lore.evaluation import load_cases, validate_case_distribution
+from src.lore.models import LoreAugmentation, LoreCitation, LoreSearchResult
+from src.lore.review import build_retrieval_match_review
 
 
 def test_fixed_lore_eval_set_has_required_40_case_distribution() -> None:
@@ -40,3 +44,61 @@ def test_lore_runtime_indexes_and_detailed_results_are_gitignored() -> None:
     ignore = open(".gitignore", encoding="utf-8").read()
     assert "data/lore_index/" in ignore
     assert "evals/lore_rag_results.jsonl" in ignore
+
+
+def test_eight_relationship_cases_have_expected_answers() -> None:
+    cases = [case for case in load_cases() if case.category == "人物互动与关系"]
+    assert len(cases) == 8
+    assert all(case.expected_answer for case in cases)
+
+
+def test_retrieval_match_review_keeps_human_fields_not_checked(tmp_path) -> None:
+    class FakeLoreRAG:
+        def retrieve(self, query: str) -> LoreAugmentation:
+            result = LoreSearchResult(
+                chunk_id="chunk-001",
+                content="短摘要",
+                score=1.0,
+                source_url="https://www.bh3text.com/dialog/not-the-gold-page",
+                source_type="community_game_text_archive",
+                source_tier="Tier B-primary-transcript",
+                title="候选场景",
+                corpus="bh3text_dialogue",
+                review_status="unverified_transcript",
+            )
+            citation = LoreCitation(
+                title=result.title,
+                source_url=result.source_url,
+                source_tier=result.source_tier,
+                corpus=result.corpus,
+                review_status=result.review_status,
+            )
+            return LoreAugmentation(
+                query=query,
+                route="dialogue",
+                backend="hybrid",
+                context="context",
+                results=(result,),
+                citations=(citation,),
+                enabled=True,
+            )
+
+    jsonl_path = tmp_path / "review.jsonl"
+    markdown_path = tmp_path / "review.md"
+    summary = build_retrieval_match_review(
+        FakeLoreRAG(),  # type: ignore[arg-type]
+        jsonl_path=jsonl_path,
+        markdown_path=markdown_path,
+    )
+    rows = [json.loads(line) for line in jsonl_path.read_text(encoding="utf-8").splitlines()]
+    assert summary["review_cases"] == 8
+    assert len(rows) == 8
+    assert all(row["review_status"] == "not_checked" for row in rows)
+    assert all(row["citation_completeness"]["reviewer_status"] == "not_checked" for row in rows)
+    assert all(row["top_5"][0]["reviewer_relevance"] == "not_checked" for row in rows)
+    assert all(row["automatic_error_reason"] == "gold_source_not_in_top_5" for row in rows)
+    report = markdown_path.read_text(encoding="utf-8")
+    assert "Query" in report
+    assert "预期答案" in report
+    assert "Source tier" in report
+    assert "Human relevance" in report
