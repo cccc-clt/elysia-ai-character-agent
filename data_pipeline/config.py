@@ -236,6 +236,12 @@ class PipelinePaths:
     manual_source_gap: Path = (
         PROJECT_ROOT / "data" / "manifests" / "manual_source_gap.md"
     )
+    source_inventory: Path = (
+        PROJECT_ROOT / "data" / "manifests" / "source_inventory.json"
+    )
+    deduplication_report: Path = (
+        PROJECT_ROOT / "data" / "manifests" / "deduplication_report.md"
+    )
     manual_templates_dir: Path = PROJECT_ROOT / "data" / "manual_official" / "templates"
     manual_inbox_dir: Path = PROJECT_ROOT / "data" / "manual_official" / "inbox"
     manual_accepted_dir: Path = PROJECT_ROOT / "data" / "manual_official" / "accepted"
@@ -245,6 +251,9 @@ class PipelinePaths:
     manual_review: Path = PROJECT_ROOT / "data" / "review" / "manual_review.md"
     entities_review: Path = PROJECT_ROOT / "data" / "review" / "entities_review.md"
     relations_review: Path = PROJECT_ROOT / "data" / "review" / "relations_review.md"
+    relation_conflicts: Path = (
+        PROJECT_ROOT / "data" / "review" / "relation_conflicts.md"
+    )
     bilibili_official_accounts: Path = (
         PROJECT_ROOT / "data" / "config" / "bilibili_official_accounts.yaml"
     )

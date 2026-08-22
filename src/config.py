@@ -82,12 +82,26 @@ class AssetConfig:
 
 
 @dataclass(frozen=True)
+class LoreRAGConfig:
+    enabled: bool
+    prototype_mode: bool
+    allow_unverified_transcripts: bool
+    require_citations: bool
+    top_k: int
+    max_context_chars: int
+    backend: str
+    index_path: Path
+    timeout_seconds: float
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LLMConfig
     storage: StorageConfig
     voice: VoiceConfig
     audio_clips: AudioClipConfig
     assets: AssetConfig
+    lore_rag: LoreRAGConfig
     memory_summarize_interval: int = 6
     max_history_turns: int = 20
     default_character_path: Path = CHARACTERS_DIR / "elysia_character.json"
@@ -114,6 +128,9 @@ def get_config() -> AppConfig:
 
     audio_api_key = os.getenv("AUDIO_API_KEY", "").strip() or api_key
     audio_cache = PROJECT_ROOT / os.getenv("AUDIO_CACHE_DIR", "data/audio_cache")
+    lore_backend = os.getenv("LORE_RAG_BACKEND", "hybrid").strip().lower()
+    if lore_backend not in {"bm25", "vector", "hybrid"}:
+        lore_backend = "hybrid"
 
     return AppConfig(
         llm=LLMConfig(
@@ -173,6 +190,26 @@ def get_config() -> AppConfig:
                 "BACKGROUND_PATH", "assets/images/elysia_background.png"
             ),
             avatar=PROJECT_ROOT / os.getenv("AVATAR_PATH", "assets/images/avatar.png"),
+        ),
+        lore_rag=LoreRAGConfig(
+            enabled=_env_bool("LORE_RAG_ENABLED", "false"),
+            prototype_mode=_env_bool("LORE_RAG_PROTOTYPE_MODE", "true"),
+            allow_unverified_transcripts=_env_bool(
+                "LORE_RAG_ALLOW_UNVERIFIED_TRANSCRIPTS", "false"
+            ),
+            require_citations=_env_bool("LORE_RAG_REQUIRE_CITATIONS", "true"),
+            top_k=max(1, min(10, int(os.getenv("LORE_RAG_TOP_K", "5")))),
+            max_context_chars=max(
+                1000, min(12000, int(os.getenv("LORE_RAG_MAX_CONTEXT_CHARS", "6000")))
+            ),
+            backend=lore_backend,
+            index_path=PROJECT_ROOT
+            / os.getenv(
+                "LORE_RAG_INDEX_PATH", "data/lore_index/hashed_vectors.json"
+            ),
+            timeout_seconds=max(
+                0.05, min(10.0, float(os.getenv("LORE_RAG_TIMEOUT_SECONDS", "2.0")))
+            ),
         ),
         memory_summarize_interval=summarize_interval,
     )

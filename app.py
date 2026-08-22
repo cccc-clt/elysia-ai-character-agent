@@ -14,6 +14,7 @@ from src.database import Database
 from src.evaluator import evaluate_reply, get_evaluation_summary
 from src.feedback_service import FeedbackService
 from src.llm_client import LLMClient
+from src.lore import LoreRAG
 from src.memory_service import MemoryService
 from src.prompt_builder import build_system_prompt
 from src.reflection_service import ReflectionService
@@ -101,6 +102,11 @@ def get_voice_service() -> VoiceService:
 @st.cache_resource
 def get_audio_clip_service() -> AudioClipService:
     return AudioClipService(config.audio_clips)
+
+
+@st.cache_resource
+def get_lore_rag() -> LoreRAG:
+    return LoreRAG(config.lore_rag)
 
 
 def get_feedback_service() -> FeedbackService:
@@ -501,6 +507,14 @@ def _handle_user_message(
     daily_svc = get_daily_service()
     daily_view = daily_svc.ensure_today(comp_state.relationship_stage)
     prompt_memory = memory_service.get_prompt_memory_context()
+    lore_augmentation = get_lore_rag().retrieve(user_input)
+    st.session_state["last_lore_trace"] = {
+        "route": lore_augmentation.route,
+        "backend": lore_augmentation.backend,
+        "result_count": len(lore_augmentation.results),
+        "elapsed_ms": lore_augmentation.elapsed_ms,
+        "degraded_reason": lore_augmentation.degraded_reason,
+    }
 
     system_prompt = build_system_prompt(
         character=character,
@@ -515,6 +529,7 @@ def _handle_user_message(
             prompt_memory.excluded_profile_fields
         ),
         companion_mode_instructions=get_mode_instructions(db),
+        lore_context=lore_augmentation.context,
         excluded_message_ids=prompt_memory.excluded_message_ids,
     )
 
@@ -525,6 +540,8 @@ def _handle_user_message(
 
     with st.spinner("爱莉希雅正在认真听你说的话……"):
         reply = llm.chat(system_prompt, user_input, model=config.llm.chat_model)
+    if config.lore_rag.require_citations:
+        reply = lore_augmentation.append_sources(reply)
 
     assistant_msg: dict = {"role": "assistant", "content": reply}
     messages.append(assistant_msg)

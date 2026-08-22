@@ -11,6 +11,8 @@ __pycache__/
 data/*.db
 data/*.sqlite
 data/audio_cache/
+data/lore_index/
+evals/lore_rag_results.jsonl
 
 # Official lore pipeline runtime output (keep only source seeds/placeholders)
 data/raw/*

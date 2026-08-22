@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from data_pipeline.config import PipelinePaths
-from data_pipeline.schemas import LoreEntity, LoreRelation
+from data_pipeline.schemas import BH3TextPendingRelation, LoreEntity, LoreRelation
 from data_pipeline.utils import read_jsonl
 
 
@@ -25,6 +25,12 @@ def build_review_workbench(paths: PipelinePaths | None = None) -> dict[str, int]
     for row in read_jsonl(paths.relations_pending):
         try:
             relations.append(LoreRelation.model_validate(row))
+        except ValueError:
+            continue
+    transcript_relations: list[BH3TextPendingRelation] = []
+    for row in read_jsonl(paths.bh3text_relations_pending):
+        try:
+            transcript_relations.append(BH3TextPendingRelation.model_validate(row))
         except ValueError:
             continue
 
@@ -84,11 +90,70 @@ def build_review_workbench(paths: PipelinePaths | None = None) -> dict[str, int]
         )
     if not relations:
         relation_lines.append("| - | - | - | - | - | 0 | 无明确关系句 | - | - |")
+    relation_lines.extend(
+        [
+            "",
+            "## BH3Text待审核语义关系",
+            "",
+            "> 这些候选来自非官方托管剧情转录，必须由官方资料佐证；不得写入confirmed。",
+            "",
+            "| 来源实体 | 关系 | 目标实体 | 章节/场景 | confidence | 短证据 | 来源 | review |",
+            "|---|---|---|---|---:|---|---|---|",
+        ]
+    )
+    for relation in transcript_relations:
+        relation_lines.append(
+            f"| {relation.source_entity} | {relation.relation} | "
+            f"{relation.target_entity} | {relation.chapter}/{relation.scene} | "
+            f"{relation.confidence} | {_short(relation.evidence)} | "
+            f"{relation.source_url} | pending，需官方佐证 |"
+        )
+    if not transcript_relations:
+        relation_lines.append(
+            "| - | - | - | - | 0 | 严格规则未生成候选（这是允许结果） | - | - |"
+        )
     paths.relations_review.write_text(
         "\n".join(relation_lines) + "\n", encoding="utf-8"
     )
+    pair_relations: dict[tuple[str, str], set[str]] = {}
+    pair_sources: dict[tuple[str, str], set[str]] = {}
+    combined = [
+        (row.source_entity, row.relation, row.target_entity, row.source_url)
+        for row in relations
+    ] + [
+        (row.source_entity, row.relation, row.target_entity, row.source_url)
+        for row in transcript_relations
+    ]
+    for source, relation, target, source_url in combined:
+        key = (source, target)
+        pair_relations.setdefault(key, set()).add(str(relation))
+        pair_sources.setdefault(key, set()).add(source_url)
+    conflicts = [
+        (pair, sorted(values), sorted(pair_sources[pair]))
+        for pair, values in pair_relations.items()
+        if len(values) > 1
+    ]
+    conflict_lines = [
+        "# 关系候选冲突报告",
+        "",
+        "> 仅比较pending候选；证据边 `SPEAKS_TO/SPEAKS_ABOUT/APPEARS_WITH` 不视为语义关系，也不会出现在这里。",
+        "",
+        "| 来源实体 | 目标实体 | 冲突关系 | 来源URL | 人工结论 |",
+        "|---|---|---|---|---|",
+    ]
+    for (source, target), relation_types, urls in conflicts:
+        conflict_lines.append(
+            f"| {source} | {target} | {'、'.join(relation_types)} | "
+            f"{'<br>'.join(urls)} | 待填写 |"
+        )
+    if not conflicts:
+        conflict_lines.append("| - | - | 无pending关系冲突 | - | - |")
+    paths.relation_conflicts.write_text(
+        "\n".join(conflict_lines) + "\n", encoding="utf-8"
+    )
     return {
         "pending_entities": len(entities),
-        "pending_relations": len(relations),
+        "pending_relations": len(relations) + len(transcript_relations),
+        "relation_conflicts": len(conflicts),
         "alias_merge_suggestions": 2,
     }

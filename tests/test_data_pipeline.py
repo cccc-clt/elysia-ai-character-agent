@@ -63,6 +63,7 @@ from data_pipeline.source_registry import (
     identify_source_tier,
     load_source_registry,
 )
+from data_pipeline.source_inventory import build_source_inventory
 from data_pipeline.utils import (
     content_hash,
     is_allowed_url,
@@ -109,6 +110,8 @@ def _paths(tmp_path: Path) -> PipelinePaths:
         coverage_json=data / "manifests" / "lore_coverage_matrix.json",
         coverage_markdown=data / "manifests" / "lore_coverage_matrix.md",
         manual_source_gap=data / "manifests" / "manual_source_gap.md",
+        source_inventory=data / "manifests" / "source_inventory.json",
+        deduplication_report=data / "manifests" / "deduplication_report.md",
         manual_templates_dir=data / "manual_official" / "templates",
         manual_inbox_dir=data / "manual_official" / "inbox",
         manual_accepted_dir=data / "manual_official" / "accepted",
@@ -116,6 +119,7 @@ def _paths(tmp_path: Path) -> PipelinePaths:
         manual_review=data / "review" / "manual_review.md",
         entities_review=data / "review" / "entities_review.md",
         relations_review=data / "review" / "relations_review.md",
+        relation_conflicts=data / "review" / "relation_conflicts.md",
         bilibili_official_accounts=data / "config" / "bilibili_official_accounts.yaml",
         video_seed_file=data / "video_sources" / "bilibili_seeds.txt",
         video_metadata_dir=data / "video_sources" / "metadata",
@@ -1216,6 +1220,54 @@ def test_alias_workbench_only_suggests_and_never_merges(tmp_path: Path) -> None:
     assert not paths.entities.exists()
 
 
+def test_pending_relation_conflicts_remain_human_review_only(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    write_jsonl(
+        paths.relations_pending,
+        [
+            {
+                "relation_id": "relation_official_001",
+                "source_entity": "爱莉希雅",
+                "relation": "KNOWS",
+                "target_entity": "凯文",
+                "evidence": "爱莉希雅明确说自己认识凯文。",
+                "source_url": "https://baike.mihoyo.com/bh3/wiki/content/1/detail",
+                "confidence": 0.8,
+                "review_status": "pending",
+            }
+        ],
+    )
+    write_jsonl(
+        paths.bh3text_relations_pending,
+        [
+            {
+                "relation_id": "bh3relation_pending_001",
+                "source_entity": "爱莉希雅",
+                "relation": "TRUSTS",
+                "target_entity": "凯文",
+                "evidence": "这是一条仍需官方佐证的短证据。",
+                "speaker": "爱莉希雅",
+                "arc": "往世乐土",
+                "chapter": "在无限的阴影之中",
+                "scene": "爱莉希雅-关于凯文",
+                "source_url": "https://www.bh3text.com/dialog/er/1/elysia-kevin",
+                "source_tier": "Tier B-primary-transcript",
+                "confidence": 0.6,
+                "requires_official_corroboration": True,
+                "review_status": "pending",
+            }
+        ],
+    )
+
+    result = build_review_workbench(paths)
+
+    assert result["pending_relations"] == 2
+    assert result["relation_conflicts"] == 1
+    conflicts = paths.relation_conflicts.read_text(encoding="utf-8")
+    assert "KNOWS" in conflicts and "TRUSTS" in conflicts
+    assert not paths.relations_confirmed.exists()
+
+
 def test_character_cooccurrence_alone_does_not_create_relation() -> None:
     document = _document("爱莉希雅、凯文与伊甸出现在同一段官方页面。")
     assert extract_rule_relations(document) == []
@@ -2048,3 +2100,53 @@ def test_bh3helper_content_cannot_enter_bh3text_chunks_or_fixture_hits(
     )
     readiness = json.loads(paths.vector_readiness.read_text(encoding="utf-8"))
     assert readiness["actual"]["test_fixture_hits"] == 0
+
+
+def test_source_inventory_keeps_community_corpora_out_of_official_counts(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    official = _rag_chunk("爱莉希雅是逐火英桀成员。")
+    document = _group_document("mainline_31", 1)
+    transcript_chunks = chunk_bh3text_document(document)
+    write_jsonl(paths.chunks, [official.model_dump(mode="json")])
+    write_jsonl(paths.bh3text_documents, [document.model_dump(mode="json")])
+    write_jsonl(
+        paths.bh3text_chunks,
+        [row.model_dump(mode="json") for row in transcript_chunks],
+    )
+    write_jsonl(
+        paths.bh3helper_navigation,
+        [{"navigation_id": "nav_001", "title": "第三十一章"}],
+    )
+    write_jsonl(
+        paths.story_navigation_chunks,
+        [
+            {
+                "chunk_id": "story_nav_chunk_001",
+                "navigation_id": "nav_001",
+                "title": "第三十一章",
+                "content": "章节：第三十一章；用途限制：仅用于剧情导航。",
+                "source_url": "https://bh3helper.xrysnow.xyz/pages/common.html?id=31",
+                "source_type": "community_story_guide",
+                "source_tier": "Tier B-curated-index",
+                "review_status": "pending",
+            }
+        ],
+    )
+    write_json(
+        paths.vector_readiness,
+        {"actual": {"test_fixture_hits": 0}},
+    )
+
+    inventory = build_source_inventory(paths)
+
+    assert inventory["official_document_count"] == 1
+    assert inventory["community_documents_counted_as_official"] == 0
+    assert inventory["corpora"]["bh3text_dialogue"]["official_documents"] == 0
+    assert inventory["corpora"]["story_navigation"]["official_documents"] == 0
+    assert inventory["development_prototype_gate"]["structurally_validated"] is True
+    assert inventory["development_prototype_gate"]["production_enabled"] is False
+    report = paths.deduplication_report.read_text(encoding="utf-8")
+    assert document.dialogue_turns[0].text not in report
+    assert "社区文档计入official文档数：0" in report

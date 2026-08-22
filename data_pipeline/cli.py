@@ -26,6 +26,7 @@ from data_pipeline.manual_official import import_manual_records, review_manual_r
 from data_pipeline.normalizer import normalize_documents
 from data_pipeline.quality_report import generate_quality_report
 from data_pipeline.relation_extractor import extract_relations
+from data_pipeline.source_inventory import build_source_inventory
 from data_pipeline.utils import read_json, read_jsonl
 from data_pipeline.video_sources import (
     build_video_review,
@@ -221,6 +222,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("build-rag", help="build JSONL and Markdown chunks")
     subparsers.add_parser("quality-report", help="regenerate the quality report")
     subparsers.add_parser("build-coverage", help="build topic coverage and review files")
+    subparsers.add_parser(
+        "build-source-inventory",
+        help="build source-tier inventory and metadata-only deduplication report",
+    )
     inspect_video = subparsers.add_parser(
         "inspect-videos",
         help="inspect public Bilibili page metadata once without login/cookies",
@@ -362,6 +367,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = generate_quality_report(paths)
         elif args.command == "build-coverage":
             payload = build_coverage(paths)
+        elif args.command == "build-source-inventory":
+            payload = build_source_inventory(paths)
         elif args.command == "inspect-videos":
             video_paths = (
                 replace(paths, video_seed_file=args.seed_file)

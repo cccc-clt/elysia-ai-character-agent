@@ -30,6 +30,9 @@ PROMPT_TEMPLATE = """你正在扮演爱莉希雅风格的角色，与用户进�
 长期记忆：
 {long_term_memory}
 
+相关设定检索资料（与用户记忆隔离；可能来自未核验社区转录）：
+{lore_context}
+
 当前对话历史（临时上下文，不代表长期记忆）：
 {chat_history}
 
@@ -90,6 +93,7 @@ def build_system_prompt(
     companionship_context: str = "",
     user_profile_context: str = "",
     companion_mode_instructions: str = "",
+    lore_context: str = "",
     excluded_message_ids: set[int] | frozenset[int] | None = None,
 ) -> str:
     return PROMPT_TEMPLATE.format(
@@ -103,6 +107,7 @@ def build_system_prompt(
         companion_mode_instructions=companion_mode_instructions or "日常陪伴模式",
         companionship_context=companionship_context or "（默认温柔陪伴中）",
         long_term_memory=long_term_memory or "（暂无长期记忆）",
+        lore_context=lore_context or "（本轮未使用设定检索）",
         chat_history=format_chat_history(
             chat_history,
             max_history_turns,
