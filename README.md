@@ -89,6 +89,10 @@ BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布
 
 V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、BH3Text剧情转录和BH3Helper导航保持三个隔离corpora，通过BM25与可替换的hashed-vector或本地中文semantic-vector adapter，经RRF返回短证据和来源链接。它不写入用户长期记忆；未核验BH3Text默认不参与检索，人工质量门未通过前不视为正式能力。语义模型不会自动下载，模型/索引缺失时回退BM25。详见 [`docs/architecture/LORE_RAG_ARCHITECTURE.md`](docs/architecture/LORE_RAG_ARCHITECTURE.md)。
 
+### Lore Corpus V1 状态（2026-08-23 冻结）
+
+世界观语料已冻结为 **Lore Corpus V1**（分支 `codex/v1.1-stabilization`）：约 138 份 BH3Text 文档、5597 轮对话、201 chunks、2060 条证据边；Tier A 官方页 3/16 chunks，Tier B 转录 201 chunks。10 场景与 8 检索案例已记录 `user_bulk_accept` / `review_on_issue`，**不等于**逐条对照官方原文。`LORE_RAG_ENABLED` 仍默认 `false`，`vector_ready` 仍 `false`。全量爬取已停止，后续仅问题驱动增量。详见 [`LORE_CORPUS_V1_BASELINE.md`](LORE_CORPUS_V1_BASELINE.md) 与 V2 审计 [`ELYSIA_V2_PRE_IMPLEMENTATION_AUDIT.md`](ELYSIA_V2_PRE_IMPLEMENTATION_AUDIT.md)。
+
 ---
 
 ## 2. 功能特点

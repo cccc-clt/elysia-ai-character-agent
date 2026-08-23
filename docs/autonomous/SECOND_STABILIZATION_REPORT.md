@@ -1,5 +1,7 @@
 # Elysia V2 Second Stabilization Report
 
+> **Corpus V1 冻结**（2026-08-23）：语料与审核状态见 [`LORE_CORPUS_V1_BASELINE.md`](../../LORE_CORPUS_V1_BASELINE.md)；V2 实施前审计见 [`ELYSIA_V2_PRE_IMPLEMENTATION_AUDIT.md`](../../ELYSIA_V2_PRE_IMPLEMENTATION_AUDIT.md)。后续停止全量爬取。
+
 ## Outcome
 
 本轮完成标准已经达到：人工核验材料完整、8案例检索审核可逐项追溯、metadata完整性已校准、真实中文semantic backend可替换，且模型/索引不可用时BM25与原聊天降级可靠。状态没有被强行全部改绿。
