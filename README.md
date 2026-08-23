@@ -85,7 +85,7 @@
 
 BH3Helper 仅用作社区维护的剧情导航与来源发现索引，不视为官方来源；作者注释不能建立设定事实，页面中的嵌入对话也不会复制到任何 lore corpus。生成的导航元数据只保存在 Git 忽略的本地运行目录。
 
-BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布的10场景人工核验门控制未来索引资格。`not_checked` 不会由程序自动升级；critical mismatch、核验数量不足或来源URL/fixture质量门任一失败时，`vector_ready` 必须保持 `false`。当前项目仍未接入该向量索引。
+BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布的10场景人工核验门控制未来索引资格。2026-08-23用户接受了当前10场景材料，但场景2—10采用 `user_bulk_accept / review_on_issue`，没有逐场对照录像或填写时间点；该决定不会提升Tier B来源，也不满足独立转录比对门，因此 `vector_ready` 继续为 `false`。当前项目仍未接入该向量索引。
 
 V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、BH3Text剧情转录和BH3Helper导航保持三个隔离corpora，通过BM25与可替换的hashed-vector或本地中文semantic-vector adapter，经RRF返回短证据和来源链接。它不写入用户长期记忆；未核验BH3Text默认不参与检索，人工质量门未通过前不视为正式能力。语义模型不会自动下载，模型/索引缺失时回退BM25。详见 [`docs/architecture/LORE_RAG_ARCHITECTURE.md`](docs/architecture/LORE_RAG_ARCHITECTURE.md)。
 
@@ -590,7 +590,7 @@ SQLite 在云端可能因重启或实例回收而丢失，**适合 Demo，不适
 4. **SQLite** 面向单用户 Demo；多用户需 session 隔离与外置存储。  
 5. **角色一致性**由 LLM 评估，不能保证 100% 符合人设。  
 6. 生成内容由大模型产生，安全相关话题会尝试脱离角色设定进行提示。  
-7. **Lore RAG** 仍是默认关闭的开发原型；BH3Text 10场景均待人工核验，详细评测通过不等于剧情文本已验证。
+7. **Lore RAG** 仍是默认关闭的开发原型；BH3Text 10场景材料已由用户接受，但没有逐场对照录像/游戏原文，详细评测或批量接受都不等于剧情文本获得官方验证。
 8. 本地索引依赖Git ignored的corpus；云部署前必须另行设计私密数据提供、持久化与冷启动方案。
 
 ---

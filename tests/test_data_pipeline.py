@@ -2089,6 +2089,56 @@ def test_critical_mismatch_blocks_otherwise_satisfied_vector_gate(
     assert readiness["vector_ready"] is False
 
 
+def test_user_bulk_accept_does_not_unlock_transcript_vector_gate(
+    tmp_path: Path,
+) -> None:
+    paths = _paths(tmp_path)
+    documents = [
+        _group_document("mainline_31", index) for index in range(8)
+    ] + [_group_document("mainline_30", index) for index in range(2)]
+    verification = [
+        BH3TextVerificationRecord(
+            verification_id=f"bh3verify_bulk_{index:03d}",
+            document_id=document.document_id,
+            title=document.title,
+            arc=document.arc,
+            chapter=document.chapter,
+            source_url=document.source_url,
+            sample_turns=document.dialogue_turns[:3],
+            verification_status="match",
+            reviewer_note=(
+                "User accepted the current packet without scene-by-scene comparison; "
+                "review_method=user_bulk_accept; recheck_policy=review_on_issue"
+            ),
+        )
+        for index, document in enumerate(documents)
+    ]
+    write_jsonl(
+        paths.bh3text_transcript_verification_jsonl,
+        [row.model_dump(mode="json") for row in verification],
+    )
+    base_chunks = [chunk_bh3text_document(document)[0] for document in documents]
+    chunks = [
+        base_chunks[index % len(base_chunks)].model_copy(
+            update={"chunk_id": f"bh3chunk_bulk_gate_{index:03d}"}
+        )
+        for index in range(120)
+    ]
+
+    readiness = build_vector_readiness(paths, documents, chunks)
+
+    assert readiness["actual"]["reviewed_scenes"] == 10
+    assert readiness["actual"]["matches"] == 10
+    assert readiness["bulk_accepted_scenes"] == 10
+    assert readiness["manual_review_complete"] is True
+    assert readiness["manual_transcript_comparison_complete"] is False
+    assert (
+        readiness["conditions_met"]["individual_transcript_comparison_complete"]
+        is False
+    )
+    assert readiness["vector_ready"] is False
+
+
 def test_bh3helper_content_cannot_enter_bh3text_chunks_or_fixture_hits(
     tmp_path: Path,
 ) -> None:

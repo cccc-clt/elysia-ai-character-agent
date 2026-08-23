@@ -110,7 +110,7 @@ python -m data_pipeline.cli status
 | `data/chunks/bh3text_lore_chunks.jsonl` | 与主 RAG 分离的剧情文本 chunks；不提交 Git |
 | `data/relations/dialogue_evidence_edges.jsonl` | `SPEAKS_TO/SPEAKS_ABOUT/APPEARS_WITH` 文本证据边 |
 | `data/relations/bh3text_relations_pending.jsonl` | 仅限明确台词的待审核设定关系，永不自动 confirmed |
-| `data/review/bh3text_transcript_verification.md` | 默认 `not_checked` 的视频人工抽样核验清单 |
+| `data/review/bh3text_transcript_verification.md` | 新样本默认 `not_checked`；保留用户决定并区分批量接受与逐场比对的核验清单 |
 | `data/review/bh3text_transcript_verification.jsonl` | 2/1/1/2/2/2 固定章节分布的机器可读核验样本 |
 | `data/manifests/bh3text_group_coverage_before.json` | coverage-gap 补采前分组配额快照 |
 | `data/manifests/bh3text_group_coverage_after.json` | coverage-gap 补采后分组配额快照 |
@@ -151,7 +151,9 @@ BH3Text（`https://www.bh3text.com/dialog/`）不是米哈游官方网站。该�
 - `critical_mismatch`：说话者错误、台词被改写、大段缺失、不同场景混合，或身份、关系、事件含义发生变化。
 - `not_checked`：尚未人工查看视频或游戏原文。程序只生成待核验样本，绝不自行将其改成 `match`。
 
-`vector_readiness.json` 还要求至少10个已审核场景、至少8个 `match`、0个 critical mismatch、主线31章至少8个文档、至少120个BH3Text chunks、所有chunk有原始URL且fixture命中为0。即使数据数量达标，人工核验未完成时 `vector_ready` 仍必须为 `false`。
+`review_method=user_bulk_accept` 表示用户整体接受当前材料并采用 `review_on_issue`，不代表逐场播放录像或核对游戏原文；来源仍为 `Tier B-primary-transcript`。该方式可以记录为 `match`，但不会勾选逐条视频比对项，也不能解锁向量质量门。
+
+`vector_readiness.json` 还要求至少10个已审核场景、至少8个 `match`、0个 critical mismatch、主线31章至少8个文档、至少120个BH3Text chunks、所有chunk有原始URL且fixture命中为0。除此之外，若存在 `user_bulk_accept` 场景，`individual_transcript_comparison_complete=false`，`vector_ready` 必须保持 `false`。
 
 ## BH3Helper 剧情导航边界
 

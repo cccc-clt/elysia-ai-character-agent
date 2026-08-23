@@ -45,7 +45,12 @@ def _automatic_error_reason(
     return ";".join(reasons)
 
 
-def _review_row(case: LoreEvalCase, service: LoreRAG) -> dict[str, Any]:
+def _review_row(
+    case: LoreEvalCase,
+    service: LoreRAG,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    previous = previous or {}
     result = service.retrieve(case.question)
     citation_urls = {citation.source_url for citation in result.citations}
     top_five = list(result.results[:5])
@@ -56,6 +61,34 @@ def _review_row(case: LoreEvalCase, service: LoreRAG) -> dict[str, Any]:
     retrieved_urls = [row.source_url for row in top_five]
     retrieved_tiers = [row.source_tier for row in top_five]
     gold = set(case.gold_source_urls)
+    previous_top_fingerprint = [
+        (
+            str(row.get("chunk_id", "")),
+            str(row.get("source_url", "")),
+            str(row.get("source_tier", "")),
+        )
+        for row in previous.get("top_5", [])
+        if isinstance(row, dict)
+    ]
+    current_top_fingerprint = [
+        (row.chunk_id, row.source_url, row.source_tier) for row in top_five
+    ]
+    previous_result_set_unchanged = (
+        bool(previous_top_fingerprint)
+        and previous_top_fingerprint == current_top_fingerprint
+    )
+    previous_results = {
+        str(row.get("chunk_id", "")): row
+        for row in previous.get("top_5", [])
+        if isinstance(row, dict)
+    }
+    previous_citation = (
+        previous.get("citation_completeness", {})
+        if previous_result_set_unchanged
+        else {}
+    )
+    if not isinstance(previous_citation, dict):
+        previous_citation = {}
     return {
         "review_id": f"retrieval-review-{case.case_id.lower()}",
         "case_id": case.case_id,
@@ -77,14 +110,20 @@ def _review_row(case: LoreEvalCase, service: LoreRAG) -> dict[str, Any]:
                 "automatic_relevance": (
                     "gold_source_match" if row.source_url in gold else "not_in_gold_set"
                 ),
-                "reviewer_relevance": "not_checked",
+                "reviewer_relevance": str(
+                    previous_results.get(row.chunk_id, {}).get(
+                        "reviewer_relevance", "not_checked"
+                    )
+                ),
                 "citation_present": row.source_url in citation_urls,
             }
             for rank, row in enumerate(top_five, 1)
         ],
         "citation_completeness": {
             "automatic_complete": citations_complete,
-            "reviewer_status": "not_checked",
+            "reviewer_status": str(
+                previous_citation.get("reviewer_status", "not_checked")
+            ),
         },
         "automatic_error_reason": _automatic_error_reason(
             case,
@@ -92,8 +131,16 @@ def _review_row(case: LoreEvalCase, service: LoreRAG) -> dict[str, Any]:
             retrieved_tiers,
             citations_complete,
         ),
-        "reviewer_error_reason": "",
-        "review_status": "not_checked",
+        "reviewer_error_reason": str(
+            previous.get("reviewer_error_reason", "")
+            if previous_result_set_unchanged
+            else ""
+        ),
+        "review_status": str(
+            previous.get("review_status", "not_checked")
+            if previous_result_set_unchanged
+            else "not_checked"
+        ),
     }
 
 
@@ -106,7 +153,9 @@ def _write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
         "# Lore Retrieval Match Review",
         "",
         "> 本表记录自动检索结果与gold URL对照，不代表人工相关性判断或剧情事实确认。",
-        "> `reviewer_relevance`、`reviewer_error_reason` 和总审核状态默认保持 `not_checked`。",
+        "> 新生成项的人工字段默认保持 `not_checked`；Top 5身份与顺序未变化时，已有用户决定会从JSONL保留。",
+        "> 如果重建后的Top 5发生变化，总体接受状态与备注会重置为待审核，避免把旧决定套到新结果上。",
+        "> `user_bulk_accepted` 只表示用户整体接受当前Top 5与排序，不会伪造逐结果相关性评分，也不会消除自动风险提示。",
         "",
     ]
     for index, row in enumerate(rows, 1):
@@ -122,7 +171,7 @@ def _write_markdown(path: Path, rows: list[dict[str, Any]]) -> None:
                 f"- 引用完整性（自动）：{citation['automatic_complete']}",
                 f"- 引用完整性（人工）：{citation['reviewer_status']}",
                 f"- 自动错误原因：{row['automatic_error_reason'] or 'none'}",
-                f"- 人工错误原因：{row['reviewer_error_reason'] or '待填写'}",
+                f"- 人工备注/保留风险：{row['reviewer_error_reason'] or '待填写'}",
                 f"- 总审核状态：{row['review_status']}",
                 "",
                 "| Rank | Title | Source tier | Gold URL match | Citation | Human relevance | URL |",
@@ -153,7 +202,19 @@ def build_retrieval_match_review(
     ]
     if len(cases) != 8 or any(not case.expected_answer for case in cases):
         raise ValueError("retrieval match review requires 8 cases with expected answers")
-    rows = [_review_row(case, service) for case in cases]
+    previous_rows: dict[str, dict[str, Any]] = {}
+    if jsonl_path.exists():
+        previous_rows = {
+            str(row.get("case_id", "")): row
+            for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+            for row in [json.loads(line)]
+            if isinstance(row, dict)
+        }
+    rows = [
+        _review_row(case, service, previous_rows.get(case.case_id))
+        for case in cases
+    ]
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     jsonl_path.write_text(
         "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
@@ -162,7 +223,19 @@ def build_retrieval_match_review(
     _write_markdown(markdown_path, rows)
     return {
         "review_cases": len(rows),
-        "review_status": "not_checked",
+        "review_status": (
+            rows[0]["review_status"]
+            if rows and len({row["review_status"] for row in rows}) == 1
+            else "mixed"
+        ),
+        "user_bulk_accepted": sum(
+            row["review_status"] == "user_bulk_accepted" for row in rows
+        ),
+        "individually_scored_results": sum(
+            item["reviewer_relevance"] != "not_checked"
+            for row in rows
+            for item in row["top_5"]
+        ),
         "automatic_gold_hits_at_5": sum(
             any(item["automatic_relevance"] == "gold_source_match" for item in row["top_5"])
             for row in rows

@@ -7,9 +7,9 @@
 | Status | Outcome |
 |---|---|
 | Implemented | 10场景增强核验包、8案例审核工作台、章节/别名/去重完整性审计、sentence-transformers本地adapter、dense cosine index、离线semantic评测编排 |
-| Verified | 138 BH3Text文档、201 chunks、5597 turns、2060证据边；8/8 gold URL Top 5；当前hashed 40例评测门通过；139项自动化测试通过 |
+| Verified | 138 BH3Text文档、201 chunks、5597 turns、2060证据边；10/10场景与8/8检索案例已记录用户接受；8/8 gold URL Top 5；当前hashed 40例评测门通过 |
 | Prototype only | hashed与semantic向量路径、BH3Text检索、聊天Lore接入；全部保持production disabled |
-| Blocked for human review | 10场景转录核验、8案例相关性/错误审核、4类语义实体边界、正式启用决策 |
+| Blocked for human review | 逐场视频/游戏原文比对与时间点、4类语义实体边界、任何未来关系确认、semantic模型质量及正式启用决策 |
 | Not performed | 新增抓取、模型下载、付费API、正式向量库、部署、push、PR、数据库迁移、人工状态伪造 |
 
 ## Baseline and branch audit
@@ -17,7 +17,7 @@
 - Branch: `codex/v1.1-stabilization`，没有直接在main工作。
 - 起始时确认4个本地提交：`c94bbdf`、`8533381`、`7a0451a`、`5d32e86`。
 - 本轮增加5个功能检查点与本报告文档检查点，完成后相对remote共有10个本地提交；未push。
-- 起始基线：122 tests passed；本轮最终：139 tests passed。
+- 起始基线：122 tests passed；第二轮交接时139 tests passed；2026-08-23批量决策同步后141 tests passed。
 - Git commit均成功。每次commit后的自动geometric repack仍出现本机 `.git` maintenance权限提示；提交对象与branch引用未丢失。
 
 ## Implemented
@@ -29,7 +29,9 @@ Git ignored的以下运行材料已重新生成：
 - `data/review/bh3text_transcript_verification.jsonl`；
 - `data/review/bh3text_transcript_verification.md`。
 
-10/10场景均包含：篇章、章节、相邻上下文、角色列表、BH3Text原始URL、来源等级、5轮短证据、5项待确认内容、视频/P提示和空时间点。程序没有播放视频，也没有修改任何 `not_checked`。
+10/10场景均包含：篇章、章节、相邻上下文、角色列表、BH3Text原始URL、来源等级、5轮短证据、5项待确认内容、视频/P提示和空时间点。2026-08-23，用户终止逐项流程并接受当前材料：场景1保留原监督接受记录，场景2—10标记 `match` 并记录 `review_method=user_bulk_accept`、`recheck_policy=review_on_issue`。
+
+该决定没有声明逐场景播放录像或核对游戏原文，所有视频时间点仍为空，场景2—10的五项逐条比对框也保持未勾选。所有文档继续是 `Tier B-primary-transcript / unverified_transcript`，不会因此成为Tier A、官方原文或confirmed关系。
 
 章节分布保持固定的 `2/1/1/2/2/2`：往世乐土第一/二/三阶段和主线29/30/31章。待审核场景为：
 
@@ -50,10 +52,11 @@ Git ignored的以下运行材料已重新生成：
 
 - automatic gold URL in Top 5: `8/8`；
 - automatic citation complete: `8/8`；
-- human reviewed: `0/8`；
+- user bulk accepted: `8/8`；
+- individually scored Top 5 results: `0/40`；
 - 需特别判断的同系列页面排序：`LRAG-REL-001` gold rank 2、`LRAG-REL-002` rank 3、`LRAG-REL-008` rank 3。
 
-自动字段没有把这些案例判为人工match；它们全部仍为 `not_checked`。
+8个案例的总审核状态记录为 `user_bulk_accepted`，但自动gold/引用字段保持独立，40个 `reviewer_relevance` 仍为 `not_checked`。用户接受没有改动Top 5、gold URL、来源、引用或排序，也没有消除上述3个同系列页面排序风险。
 
 ### 3. Entity, chapter, and dedup integrity
 
@@ -126,12 +129,12 @@ No-answer precision为100%，fixture leakage和critical prompt-injection failure
 
 ### Tests run
 
-- `python -m pytest -q` → `139 passed`；
+- `python -m pytest -q` → `141 passed`（2026-08-23批量决策同步后）；
 - `python -m compileall app.py src data_pipeline` → passed；
 - `git diff --check` → passed（仅Windows行尾提示）；
 - `python -m src.lore.evaluation` → current hashed 40-case gate passed；
 - `python -m src.lore.cli evaluate-semantic` → expected non-zero blocked state，报告生成成功；
-- `build-bh3text`、`build-coverage`、`build-source-inventory`、`status` → completed，人工门仍false。
+- 第二轮交接时 `build-bh3text`、`build-coverage`、`build-source-inventory`、`status` 均已完成；2026-08-23批量决策同步后重新执行 `build-bh3text`，`vector_ready` 仍为false。
 
 ## Prototype only
 
@@ -142,11 +145,11 @@ No-answer precision为100%，fixture leakage和critical prompt-injection failure
 
 ## Blocked for human review
 
-1. 核对10场景的视频/游戏原文、说话者和3～5轮台词，填写时间点与match状态。
-2. 审阅8案例Top 5的语义相关性、引用完整性与错误原因。
-3. 判断4类角色/形态/人格语义alias是否合并。
-4. 至少10场景reviewed、至少8 match且critical mismatch为0后，才可重新判断剧情向量索引资格。
-5. 即使人工门和semantic评测都通过，是否启用 `LORE_RAG_ENABLED`、push、PR或部署仍由用户决定。
+1. 只有实际检索或回答暴露问题时，才按场景或检索案例复查；当前未逐场填写视频时间点。
+2. 判断4类角色/形态/人格语义alias是否合并；当前继续pending。
+3. 审核任何未来pending关系；本次confirmed关系仍为0。
+4. 若要重新判断剧情向量索引资格，仍需完成逐场转录比对门；用户批量接受材料不能替代该门。
+5. semantic模型安装与真实质量评测、`LORE_RAG_ENABLED`、push、PR及部署仍须用户另行授权。
 
 ## Not performed
 
@@ -156,6 +159,7 @@ No-answer precision为100%，fixture leakage和critical prompt-injection failure
 - 未接入Qdrant、pgvector、FAISS、Chroma或正式向量服务。
 - 未修改数据库schema、Memory、用户数据、Prompt人格规则、语音或UI。
 - 未把BH3Text提升为Tier A，未把证据边转为语义关系，未自动确认任何关系。
+- 未伪造逐场视频时间点、逐结果0—3相关性评分或官方交叉核验记录。
 - 未部署、push或创建PR。
 
 ## Security and privacy review
@@ -168,7 +172,8 @@ No-answer precision为100%，fixture leakage和critical prompt-injection failure
 ## Risks
 
 - 默认BGE模型未实际运行，真实中文语义质量、内存、冷启动和部署资源仍未知。
-- 8案例gold URL是页面级评测设计，不等于人工判断Top 1答案已经正确。
+- 8案例gold URL是页面级评测设计；用户整体接受当前Top 5不等于40个结果均获得逐项相关性评分。
+- `match` 中的9项来自用户批量接受材料，不代表已逐场景对照官方录像或游戏原文；相关门因此保持false。
 - 单字角色名和维尔薇人格称谓若被错误人工合并，可能污染实体召回与未来关系图。
 - 本地Git geometric repack权限提示未修复；目前不影响commit引用，但属于机器级维护问题。
 
@@ -193,4 +198,4 @@ No-answer precision为100%，fixture leakage和critical prompt-injection failure
 - 保存10场景核验包字段结构截图，遮蔽长台词，只展示URL、来源等级和审核门；目标 `docs/portfolio/04_test_data/`。
 - 保存8案例Top 5审核表与3个排序提示；目标 `docs/portfolio/05_bad_cases/`。
 - 保存semantic adapter/RRF/BM25降级架构图与缺模报告；目标 `docs/portfolio/02_flow_and_prototype/`、`06_iteration_records/`。
-- 状态必须标注 `Prototype only`、`Blocked for human review` 和 `Not verified`，不得展示为已部署或已人工验证。
+- 状态必须标注 `Prototype only`、`User bulk accepted / not individually compared` 和 `Not verified against official footage`，不得展示为已部署或官方核验通过。

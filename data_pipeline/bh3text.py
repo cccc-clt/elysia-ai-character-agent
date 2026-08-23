@@ -1230,6 +1230,11 @@ VERIFICATION_CONFIRMATION_ITEMS = (
     "没有混入其他场景或改变身份、关系、事件含义",
 )
 
+# Human review records can use the existing free-text note to distinguish a
+# bulk acceptance of the prepared material from a scene-by-scene transcript
+# comparison.  The strict record schema intentionally remains unchanged.
+USER_BULK_ACCEPT_REVIEW_MARKER = "review_method=user_bulk_accept"
+
 
 def _verification_context(
     document: BH3TextDocument,
@@ -1361,7 +1366,8 @@ def write_transcript_verification(
     lines = [
         "# BH3Text 剧情文本抽样核验",
         "",
-        "> 默认均为 `not_checked`。程序未播放或下载B站视频，也绝不会自行填写 `match`。",
+        "> 新生成项默认为 `not_checked`。程序未播放或下载B站视频，也绝不会自行填写 `match`；已有用户决定会从JSONL保留。",
+        "> `review_method=user_bulk_accept` 表示用户接受当前材料，不代表逐场景对照了视频或游戏原文，也不能提升来源等级。",
         "",
         "## 人工核验标准",
         "",
@@ -1372,6 +1378,10 @@ def write_transcript_verification(
         "",
     ]
     for index, row in enumerate(output, 1):
+        individually_confirmed = (
+            row.verification_status == "match"
+            and USER_BULK_ACCEPT_REVIEW_MARKER not in row.reviewer_note
+        )
         turns = "\n".join(
             f"  - {turn.speaker or '旁白'}：{turn.text}"
             for turn in row.sample_turns
@@ -1396,7 +1406,10 @@ def write_transcript_verification(
                 "- 证据片段（原顺序3～5轮）：",
                 turns,
                 "- 待确认项：",
-                *(f"  - [ ] {item}" for item in row.confirmation_items),
+                *(
+                    f"  - [{'x' if individually_confirmed else ' '}] {item}"
+                    for item in row.confirmation_items
+                ),
                 "",
             ]
         )
@@ -1420,6 +1433,10 @@ def build_vector_readiness(
     matches = sum(row.verification_status == "match" for row in verification_rows)
     critical = sum(
         row.verification_status == "critical_mismatch" for row in verification_rows
+    )
+    bulk_accepted = sum(
+        USER_BULK_ACCEPT_REVIEW_MARKER in row.reviewer_note
+        for row in verification_rows
     )
     mainline_31 = sum(
         row.chapter == "第三十一章 因你而在的故事" for row in documents
@@ -1469,6 +1486,11 @@ def build_vector_readiness(
         "minimum_total_bh3text_chunks": len(chunks) >= 120,
         "all_chunks_have_source_url": all_source_urls,
         "test_fixture_hits": fixture_hits == 0,
+        # A user may accept the current packets as usable review material
+        # without claiming that every transcript was compared against video or
+        # game text.  That decision is recorded, but it must not unlock the
+        # independent transcript vector gate.
+        "individual_transcript_comparison_complete": bulk_accepted == 0,
     }
     vector_ready = all(conditions.values())
     payload = {
@@ -1477,9 +1499,14 @@ def build_vector_readiness(
         "actual": actual,
         "conditions_met": conditions,
         "manual_review_complete": reviewed >= 10,
+        "bulk_accepted_scenes": bulk_accepted,
+        "manual_transcript_comparison_complete": bulk_accepted == 0,
         "vector_ready": vector_ready,
         "reason": (
-            "全部质量门已通过；仍需单独决策是否建立向量索引"
+            "用户已批量接受当前场景材料，但未逐场景对照录像或游戏原文；"
+            "不得建立独立剧情向量索引，发现问题时按场景复查"
+            if bulk_accepted
+            else "全部质量门已通过；仍需单独决策是否建立向量索引"
             if vector_ready
             else "人工核验或数据质量门尚未全部通过，不得建立向量索引"
         ),
@@ -1540,11 +1567,7 @@ def _rebuild_outputs(paths: PipelinePaths) -> dict[str, Any]:
         "verification_scenes": verification_count,
         "sampled_verified_documents": sampled_verified,
         "independent_transcript_index_ready": index_ready,
-        "independent_transcript_index_reason": (
-            "至少10个抽样场景已人工核验，可评估建立独立剧情文本索引"
-            if index_ready
-            else "vector_readiness仍为false，尚未通过人工核验与数据质量门"
-        ),
+        "independent_transcript_index_reason": str(readiness["reason"]),
         "vector_ready": index_ready,
     }
 

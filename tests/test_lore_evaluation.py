@@ -102,3 +102,91 @@ def test_retrieval_match_review_keeps_human_fields_not_checked(tmp_path) -> None
     assert "预期答案" in report
     assert "Source tier" in report
     assert "Human relevance" in report
+
+
+def test_retrieval_match_review_preserves_bulk_accept_without_scores(tmp_path) -> None:
+    class FakeLoreRAG:
+        chunk_id = "chunk-001"
+
+        def retrieve(self, query: str) -> LoreAugmentation:
+            result = LoreSearchResult(
+                chunk_id=self.chunk_id,
+                content="短摘要",
+                score=1.0,
+                source_url="https://www.bh3text.com/dialog/not-the-gold-page",
+                source_type="community_game_text_archive",
+                source_tier="Tier B-primary-transcript",
+                title="候选场景",
+                corpus="bh3text_dialogue",
+                review_status="unverified_transcript",
+            )
+            citation = LoreCitation(
+                title=result.title,
+                source_url=result.source_url,
+                source_tier=result.source_tier,
+                corpus=result.corpus,
+                review_status=result.review_status,
+            )
+            return LoreAugmentation(
+                query=query,
+                route="dialogue",
+                backend="hybrid",
+                context="context",
+                results=(result,),
+                citations=(citation,),
+                enabled=True,
+            )
+
+    jsonl_path = tmp_path / "review.jsonl"
+    markdown_path = tmp_path / "review.md"
+    service = FakeLoreRAG()
+    build_retrieval_match_review(
+        service,  # type: ignore[arg-type]
+        jsonl_path=jsonl_path,
+        markdown_path=markdown_path,
+    )
+    rows = [
+        json.loads(line)
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    rows[0]["review_status"] = "user_bulk_accepted"
+    rows[0]["reviewer_error_reason"] = (
+        "review_method=user_bulk_accept; recheck_policy=review_on_issue"
+    )
+    jsonl_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = build_retrieval_match_review(
+        service,  # type: ignore[arg-type]
+        jsonl_path=jsonl_path,
+        markdown_path=markdown_path,
+    )
+    rebuilt = [
+        json.loads(line)
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert rebuilt[0]["review_status"] == "user_bulk_accepted"
+    assert rebuilt[0]["reviewer_error_reason"].startswith(
+        "review_method=user_bulk_accept"
+    )
+    assert rebuilt[0]["top_5"][0]["reviewer_relevance"] == "not_checked"
+    assert rebuilt[0]["citation_completeness"]["reviewer_status"] == "not_checked"
+    assert summary["user_bulk_accepted"] == 1
+    assert summary["individually_scored_results"] == 0
+
+    service.chunk_id = "chunk-002"
+    changed_summary = build_retrieval_match_review(
+        service,  # type: ignore[arg-type]
+        jsonl_path=jsonl_path,
+        markdown_path=markdown_path,
+    )
+    changed = [
+        json.loads(line)
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert changed[0]["review_status"] == "not_checked"
+    assert changed[0]["reviewer_error_reason"] == ""
+    assert changed_summary["user_bulk_accepted"] == 0

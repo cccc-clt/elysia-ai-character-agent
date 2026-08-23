@@ -3,21 +3,21 @@
 ## BLOCKER-001
 
 - Task: BH3Text 10场景人工视频/游戏原文核验
-- Status: `blocked_human`
-- Evidence: `data/review/bh3text_transcript_verification.jsonl` 中10条记录均为 `not_checked`
-- Why Codex cannot safely continue: 程序没有播放视频或访问游戏原文，不能判断说话者和台词是否一致，也不能伪造 `match`
-- Work completed around the blocker: 已生成固定章节分布、3～5轮短样本、来源URL与保守视频提示；结构和质量门可继续自动验证
-- Exact user action required: 逐项查看对应视频/游戏原文，填写时间点并标记 `match`、`minor_mismatch` 或 `critical_mismatch`
+- Status: `resolved_by_user_bulk_accept_with_limitations`
+- Evidence: 10/10场景为 `match`；场景2—10备注含 `review_method=user_bulk_accept`，所有视频时间点仍为空
+- Decision boundary: 用户接受当前材料并改为 `review_on_issue`，没有声称逐场对照视频或游戏原文；BH3Text仍为Tier B，`vector_ready`仍为false
+- Work completed around the blocker: 固定章节分布、3～5轮短样本、来源URL、保守视频提示和用户决策均已记录
+- Future action: 只有实际检索/回答发现问题，或另行决定开放向量门时，才按场景填写真实时间点与差异
 - Resume command: `python -m data_pipeline.cli build-bh3text`
 
 ## BLOCKER-002
 
 - Task: 8案例检索结果的人工相关性、引用完整性与错误归因
-- Status: `blocked_human`
-- Evidence: `data/review/lore_retrieval_match_review.jsonl` 中8条记录均为 `not_checked`
-- Why Codex cannot safely continue: gold URL命中只证明确定性对照，不能代替人对Top 5语义相关性和预期答案的判断
-- Work completed around the blocker: 8/8 gold URL进入Top 5、8/8引用字段完整；3个同系列分段页面排序提示已标出
-- Exact user action required: 审阅Top 5并填写 `reviewer_relevance`、引用人工状态、错误原因和最终审核状态
+- Status: `resolved_by_user_bulk_accept_with_limitations`
+- Evidence: 8/8总审核状态为 `user_bulk_accepted`；40个逐结果相关性字段仍为 `not_checked`
+- Decision boundary: 用户接受当前Top 5与现阶段排序，但没有伪造逐条0—3分；自动指标与用户决定分开记录
+- Work completed around the blocker: 8/8 gold URL进入Top 5、8/8引用字段完整；3个同系列分段页面排序风险继续保留
+- Future action: 实际回答出现误召回、错误引用或系列页排序问题时，按案例复查
 - Resume command: `python -m src.lore.cli build-review --include-unverified-transcripts`
 
 ## BLOCKER-003

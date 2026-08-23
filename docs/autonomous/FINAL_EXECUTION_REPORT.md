@@ -2,6 +2,15 @@
 
 > Historical first-round report. The current second-round result is recorded in `docs/autonomous/SECOND_STABILIZATION_REPORT.md`; first-round numbers below are retained as historical evidence.
 
+## Human supervision update — 2026-08-23
+
+- 用户终止逐项展示流程并接受当前10个场景材料：场景1保留原结果，场景2—10记录为 `match / user_bulk_accept / review_on_issue`。
+- 该决定没有逐场景对照录像或游戏原文，视频时间点仍为空；BH3Text继续为 `Tier B-primary-transcript / unverified_transcript`。
+- 8/8检索案例记录为 `user_bulk_accepted`；Top 5、gold URL、引用、来源和排序未改，40个逐结果相关性字段仍为 `not_checked`。
+- `LRAG-REL-001`、`LRAG-REL-002`、`LRAG-REL-008` 的同系列页面排序风险继续保留。
+- `vector_ready=false`、`LORE_RAG_ENABLED=false`、confirmed关系0；实体/形态/记忆体/装备和人物关系没有自动合并或确认。
+- 同步后验证：`python -m pytest -q`为141 passed，`compileall`与`git diff --check`通过。
+
 ## Outcome
 
 本次自治执行完成了文件所列 A–L 中所有无需用户本人判断、无需外部账号且不涉及正式部署的工作。
@@ -11,14 +20,14 @@
 | Implemented | BH3Text分组配额补采、均衡核验包、来源台账/去重、隔离Lore检索、BM25/本地向量/RRF、引用、默认关闭接入、关系审核、40题评测、安全降级与文档 |
 | Verified | 本地结构门、来源隔离、评测开发门、122项测试、compileall、diff check |
 | Prototype only | BH3Text检索、hashed-vector索引与聊天接入；默认关闭且production disabled |
-| Blocked for human review | 10场景视频/游戏原文核验、confirmed关系/实体、正式启用与远端部署决策 |
+| Blocked for human review | 逐场视频/游戏原文比对、confirmed关系/实体、semantic质量、正式启用与远端部署决策 |
 | Not performed | push、PR、部署、付费API批处理、视频下载、破坏性迁移、人工核验伪造 |
 
 ## Completed Tasks
 
 - A：建立预检、进度台账、阻塞台账、人工返回清单和本地检查点。
 - B：实现并实际运行BH3Text `coverage-gap`，新增38个唯一页面。
-- C：生成10条机器可读/Markdown均衡核验记录，结构验证通过且状态保持 `not_checked`。
+- C：生成10条机器可读/Markdown均衡核验记录；自治执行时状态保持 `not_checked`，2026-08-23按用户决定更新为接受。
 - D：生成四类隔离语料source inventory、hash去重与开发原型门。
 - E/F：实现 `LoreRAG.retrieve(query)` 深模块、BM25、hashed vector、RRF、来源路由、引用、安全过滤和降级。
 - G：在当前聊天Prompt中以默认关闭feature flags接入Lore层，保存轻量trace并附短来源列表。
@@ -32,16 +41,16 @@
 
 - Lore已接入当前聊天流程，但主升级计划中的通用Function Calling `ElysiaHarness`、Tool Registry与Approval UI仍是独立后续Phase；本次没有假装它们已经实现。
 - 本地向量adapter是 `hashed-char-ngram-v1` 词法稀疏向量，不是神经语义embedding。
-- BH3Text转录可供显式开发原型评测，但全部仍是非官方托管且未人工核验；正式 `vector_ready` 保持false。
+- BH3Text转录可供显式开发原型评测，但全部仍是非官方托管。用户已接受当前材料，但没有逐场景对照录像或游戏原文；正式 `vector_ready` 保持false。
 - 官方层仍只有3个有效文档/16个chunks/3个usable主题，不把BH3Text的20个usable转录主题混称为官方覆盖。
 - 0条pending/confirmed语义关系是严格证据规则的真实结果，不为展示数量放宽。
 
 ## Human-blocked Tasks
 
-- 逐项观看视频或核对游戏原文，审核 `data/review/bh3text_transcript_verification.jsonl` 的10条记录。
-- 至少8条标记 `match` 且critical mismatch为0后，重新运行 `build-bh3text`。
+- 若实际检索或回答发现问题，按场景或案例复查录像、游戏原文、章节、上下文、引用和排序。
+- 若要开放独立剧情向量索引，仍需逐场转录比对证据；`user_bulk_accept` 不满足该门。
 - 审核实体别名合并、26个官方候选外链、BH3Helper档案边界和任何未来pending关系。
-- 决定是否允许未核验转录正式参与回答、是否更换语义向量后端、是否开启 `LORE_RAG_ENABLED`。
+- 决定是否允许未逐场核验的转录正式参与回答、是否运行真实semantic模型、是否开启 `LORE_RAG_ENABLED`。
 - 决定push、PR与部署；当前均未执行。
 
 ## Files Changed
@@ -157,27 +166,15 @@ Hybrid分阶段p50：corpus load 0.021ms、BM25 254.913ms、vector 351.705ms、f
 - 未修改生产域名、Secrets或远端环境。
 - 未运行任何付费LLM/embedding/judge批处理。
 - 未下载B站视频、音频、漫画或官方素材。
-- 未把 `not_checked` 自动改成 `match`。
+- 程序没有自动把 `not_checked` 改成 `match`；2026-08-23的状态变化来自用户明确批量决定，并在备注中标明没有逐场视频对照。
 - 未把pending实体/关系自动改成confirmed。
 - 未接入正式向量数据库，未开放任意shell工具。
 - 未修改数据库schema、用户Memory数据或聊天历史。
 
 ## Exact Steps for the User to Resume
 
-1. 打开 `data/review/bh3text_transcript_verification.md`，完成下列10项人工核验并填写时间点：
-   - 千劫-关于自身·其四
-   - 华-关于爱莉希雅·其一
-   - 梅比乌斯-关于自身·其三
-   - 爱莉希雅-关于至深之处·其一
-   - 「我们」的开始-黄金庭院
-   - 往昔的记忆-一段过往
-   - 维尔薇篇-一些往事
-   - 维尔薇篇-尘埃落定
-   - 乐土永存-少女初成
-   - 乐土永存-当日赠别
-2. 保持3～5轮抽样，按README标准填写 `match/minor_mismatch/critical_mismatch`；不要只根据标题判断。
-3. 运行 `python -m data_pipeline.cli build-bh3text`，确认至少8 match、0 critical且 `vector_readiness` 所有人工门通过。
-4. 审阅 `docs/evals/LORE_RAG_EVALUATION_REPORT.md` 的失败明细和 `docs/decisions/ADR_LORE_RETRIEVAL_BACKEND.md`。
-5. 审核实体/关系、26个官方候选外链和BH3Helper档案来源边界。
-6. 决定是否打开 `LORE_RAG_ENABLED`、是否允许未核验转录、是否迁移向量后端。
-7. 最后由用户决定是否push、PR或部署。
+1. 实际使用出现章节、角色、上下文、引用或排序问题时，在两份Git ignored审核表中定位对应场景/案例并针对性复查。
+2. 若复查录像或游戏原文，填写真实时间点和差异类型；不得沿用批量接受备注冒充逐场核验。
+3. 审核实体/关系、26个官方候选外链和BH3Helper档案来源边界；歧义项继续pending。
+4. 只有另行授权本地模型验证后，才运行真实中文semantic评测；不得伪造指标。
+5. 由用户另行决定是否打开 `LORE_RAG_ENABLED`、push、PR或部署。
