@@ -11,6 +11,52 @@ __pycache__/
 data/*.db
 data/*.sqlite
 data/audio_cache/
+data/lore_index/
+evals/lore_rag_results.jsonl
+evals/lore_semantic_results.jsonl
+
+# Official lore pipeline runtime output (keep only source seeds/placeholders)
+data/raw/*
+!data/raw/.gitkeep
+data/cleaned/*
+!data/cleaned/.gitkeep
+data/chunks/*
+!data/chunks/.gitkeep
+data/entities/*
+!data/entities/.gitkeep
+data/relations/*
+!data/relations/.gitkeep
+data/manifests/*
+!data/manifests/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+
+# Manually captured official text stays local; only templates/placeholders are tracked
+data/manual_official/inbox/*
+!data/manual_official/inbox/.gitkeep
+data/manual_official/accepted/*
+!data/manual_official/accepted/.gitkeep
+data/manual_official/*.jsonl
+data/review/*
+!data/review/.gitkeep
+
+# BH3Helper navigation metadata is generated locally; never publish embedded story text
+data/story_guide/*
+!data/story_guide/.gitkeep
+
+# Public video audit runtime data and complete subtitles stay local
+data/video_sources/metadata/*
+!data/video_sources/metadata/.gitkeep
+data/video_sources/subtitles_raw/*
+!data/video_sources/subtitles_raw/.gitkeep
+data/video_sources/subtitles_cleaned/*
+!data/video_sources/subtitles_cleaned/.gitkeep
+data/video_sources/chunks/*
+!data/video_sources/chunks/.gitkeep
+data/video_sources/manual_inbox/*
+!data/video_sources/manual_inbox/.gitkeep
+data/video_sources/review/*
+!data/video_sources/review/.gitkeep
 
 # Local-only large assets (placeholders documented in assets/README.md)
 assets/images/*.png

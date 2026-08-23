@@ -83,6 +83,12 @@
 
 本项目为 **fan-made、non-commercial demo**，与 **miHoYo / HoYoverse 无任何官方关联**。仓库不包含官方立绘、官方配音或游戏素材；生成内容仅供技术演示与学习展示。
 
+BH3Helper 仅用作社区维护的剧情导航与来源发现索引，不视为官方来源；作者注释不能建立设定事实，页面中的嵌入对话也不会复制到任何 lore corpus。生成的导航元数据只保存在 Git 忽略的本地运行目录。
+
+BH3Text 剧情语料采用章节分组配额补采，并通过固定章节分布的10场景人工核验门控制未来索引资格。2026-08-23用户接受了当前10场景材料，但场景2—10采用 `user_bulk_accept / review_on_issue`，没有逐场对照录像或填写时间点；该决定不会提升Tier B来源，也不满足独立转录比对门，因此 `vector_ready` 继续为 `false`。当前项目仍未接入该向量索引。
+
+V2 Lore RAG 已实现为**默认关闭的本地开发原型**：官方设定、BH3Text剧情转录和BH3Helper导航保持三个隔离corpora，通过BM25与可替换的hashed-vector或本地中文semantic-vector adapter，经RRF返回短证据和来源链接。它不写入用户长期记忆；未核验BH3Text默认不参与检索，人工质量门未通过前不视为正式能力。语义模型不会自动下载，模型/索引缺失时回退BM25。详见 [`docs/architecture/LORE_RAG_ARCHITECTURE.md`](docs/architecture/LORE_RAG_ARCHITECTURE.md)。
+
 ---
 
 ## 2. 功能特点
@@ -104,6 +110,7 @@
 | 回复反馈 | 喜欢 / 不像她 / 重新生成 / 记住这段 |
 | 实验室模式 | 集中展示模型配置、数据库状态、评估、分析与角色卡管理 |
 | 角色卡 | JSON 导入导出，可替换角色设定 |
+| Lore RAG（实验性） | 默认关闭；按官方设定、非官方托管剧情转录和剧情导航分层检索，保留引用并支持BM25降级 |
 
 > `STORAGE_BACKEND=json` 时，记忆确认、反馈、回忆等部分能力受限，页面会给出提示。
 
@@ -138,6 +145,7 @@
 | 评估分析 | `Evaluator`、`AnalyticsService` |
 | 语音片段 | `AudioClipService`（本地 `official_lines`） |
 | 配置加载 | python-dotenv / Streamlit Secrets |
+| Lore检索原型 | BM25 + RRF；默认2048维hashed字符向量，可替换本地sentence-transformers中文semantic embedding |
 | 语言 | Python 3.10+ |
 
 ---
@@ -184,6 +192,7 @@ Streamlit UI (src/ui.py)
 elysia-ai-character-agent/
 ├── app.py                      # Streamlit 入口
 ├── requirements.txt            # Python 依赖（含可选语音包说明）
+├── requirements-semantic.txt   # 可选本地语义检索依赖；默认流程不安装
 ├── .env.example                # 环境变量模板（仅占位符）
 ├── assets/
 │   ├── images/                 # 本地立绘/头像（可选，大文件不入库）
@@ -203,7 +212,10 @@ elysia-ai-character-agent/
 │   ├── audio_clip_service.py
 │   ├── evaluator.py
 │   ├── analytics_service.py
-│   └── ui.py                   # 页面与主题
+│   ├── ui.py                   # 页面与主题
+│   └── lore/                   # 隔离Lore检索、引用、安全过滤与本地索引CLI
+├── evals/
+│   └── lore_rag_cases.jsonl    # 40题固定检索评测集
 ├── data/                       # 运行时数据（已 gitignore）
 │   ├── elysia_companion.db     # SQLite，首次运行自动创建
 │   ├── audio_cache/            # TTS/STT 缓存
@@ -283,6 +295,45 @@ copy .env.example .env    # Windows
 | `TEMPERATURE` | 采样温度 | `0.9` |
 | `MAX_TOKENS` | 最大生成长度 | `1500` |
 | `MEMORY_SUMMARIZE_INTERVAL` | 每 N 轮触发记忆整理 | `6` |
+
+### Lore RAG 配置（实验性）
+
+| 变量 | 说明 | 安全默认值 |
+|---|---|---|
+| `LORE_RAG_ENABLED` | 是否在聊天中启用设定检索 | `false` |
+| `LORE_RAG_PROTOTYPE_MODE` | 标记开发原型运行 | `true` |
+| `LORE_RAG_ALLOW_UNVERIFIED_TRANSCRIPTS` | 是否允许未人工核验BH3Text进入原型检索 | `false` |
+| `LORE_RAG_REQUIRE_CITATIONS` | 回复末尾附短来源列表 | `true` |
+| `LORE_RAG_TOP_K` | 最大结果数，限制为1～10 | `5` |
+| `LORE_RAG_MAX_CONTEXT_CHARS` | 单轮检索上下文字符上限 | `6000` |
+| `LORE_RAG_BACKEND` | `bm25` / `vector` / `hybrid` | `hybrid` |
+| `LORE_RAG_INDEX_PATH` | Git ignored的本地索引路径 | `data/lore_index/hashed_vectors.json` |
+| `LORE_RAG_TIMEOUT_SECONDS` | 本地检索超时后回退原聊天 | `2.0` |
+| `LORE_RAG_VECTOR_BACKEND` | `hashed` / `sentence-transformers` | `hashed` |
+| `LORE_RAG_SEMANTIC_INDEX_PATH` | Git ignored的本地dense索引路径 | `data/lore_index/semantic_vectors.json` |
+| `LORE_RAG_EMBEDDING_MODEL` | 本地中文sentence-transformers模型名或路径 | `BAAI/bge-small-zh-v1.5` |
+| `LORE_RAG_EMBEDDING_DEVICE` | 本地推理设备 | `cpu` |
+| `LORE_RAG_EMBEDDING_LOCAL_FILES_ONLY` | 禁止隐式联网下载模型 | `true` |
+
+显式构建本地开发索引与运行无付费评测：
+
+```bash
+python -m src.lore.cli build-index --include-unverified-transcripts
+python -m src.lore.evaluation
+python -m src.lore.cli build-review --include-unverified-transcripts
+```
+
+第一条命令只建立 `prototype_only` 本地hashed索引，不会把 `vector_ready` 改为true，也不会自动打开应用feature flag。hashed vector是可复现的词法向量，不是神经语义embedding。第三条命令生成8案例人工检索审核表到Git ignored的 `data/review/`。
+
+可选的真实中文语义后端必须由用户显式安装，并且默认只读取本地模型：
+
+```bash
+pip install -r requirements-semantic.txt
+python -m src.lore.cli build-index --include-unverified-transcripts --vector-backend sentence-transformers
+python -m src.lore.cli evaluate-semantic
+```
+
+`evaluate-semantic` 固定执行40例离线评测；本地没有模型时以非零状态写出 `blocked_local_model_missing`，不填写语义质量指标、不下载模型，也不影响hashed/BM25路径。当前实测状态见 [`docs/evals/LORE_SEMANTIC_BACKEND_EVALUATION.md`](docs/evals/LORE_SEMANTIC_BACKEND_EVALUATION.md)。无论离线指标如何，BH3Text的10场景人工核验门仍独立生效。
 
 ### 存储配置
 
@@ -539,6 +590,8 @@ SQLite 在云端可能因重启或实例回收而丢失，**适合 Demo，不适
 4. **SQLite** 面向单用户 Demo；多用户需 session 隔离与外置存储。  
 5. **角色一致性**由 LLM 评估，不能保证 100% 符合人设。  
 6. 生成内容由大模型产生，安全相关话题会尝试脱离角色设定进行提示。  
+7. **Lore RAG** 仍是默认关闭的开发原型；BH3Text 10场景材料已由用户接受，但没有逐场对照录像/游戏原文，详细评测或批量接受都不等于剧情文本获得官方验证。
+8. 本地索引依赖Git ignored的corpus；云部署前必须另行设计私密数据提供、持久化与冷启动方案。
 
 ---
 
@@ -558,6 +611,8 @@ SQLite 在云端可能因重启或实例回收而丢失，**适合 Demo，不适
 - 本项目为 **fan-made、non-commercial demo**，与 **miHoYo / HoYoverse 无任何官方关联**。  
 - **不拥有** 爱莉希雅角色名称、官方语音、立绘或游戏素材之版权。  
 - 仓库**不包含**官方语音素材、模型权重、参考音频或受版权保护的游戏资源。  
+- BH3Text 不是米哈游官方网站；该站声明其《崩坏3》文本存档来自网络收集、版权归米哈游所有。本项目仅把运行时采集结果用于个人研究、检索与角色 Agent 实验，不在 GitHub 重新发布完整剧情文本。
+- BH3Text 的 raw、cleaned 正文和 chunks 均为本地忽略文件；未来回答只应返回必要摘要和短证据，并附原页面 URL 与 `Tier B-primary-transcript` 来源等级，不提供整章或整场文本复现。
 - **不提供** 声线克隆、官方声优复刻或素材提取教程；**不鼓励** 未授权复刻官方声线。  
 - 用户自行准备的本地素材与自部署模型，须确保来源与使用方式**合法合规**。  
 - 语音输出来自通用 TTS、用户自部署 GPT-SoVITS 或本地片段，**不代表** 官方角色配音。  

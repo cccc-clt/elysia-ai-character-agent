@@ -1,0 +1,20 @@
+version: 1
+bh3text_collection_groups:
+  elysian_realm_1:
+    chapter: 在无限的阴影之中
+    target_total: 65
+  elysian_realm_2:
+    chapter: 致世界上的另一个我
+    target_total: 23
+  elysian_realm_3:
+    chapter: 愿时光永驻此刻，愿明日——
+    target_total: 15
+  mainline_29:
+    chapter: 第二十九章 来自乐土
+    target_total: 10
+  mainline_30:
+    chapter: 第三十章 英雄们的葬礼
+    target_total: 10
+  mainline_31:
+    chapter: 第三十一章 因你而在的故事
+    target_total: 15

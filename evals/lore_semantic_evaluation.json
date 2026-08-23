@@ -1,0 +1,21 @@
+{
+  "evaluation_status": "blocked_local_model_missing",
+  "capability_status": "Prototype only",
+  "embedding_backend": "sentence-transformers",
+  "embedding_model": "BAAI/bge-small-zh-v1.5",
+  "local_files_only": true,
+  "eligible_chunks": 223,
+  "semantic_index_created": false,
+  "semantic_metrics": null,
+  "blocked_reason": "local_semantic_model_unavailable:OSError",
+  "warnings": [],
+  "human_review_gate": {
+    "vector_ready": false,
+    "reviewed_scenes": 0,
+    "matches": 0,
+    "critical_mismatches": 0,
+    "reason": "人工核验或数据质量门尚未全部通过，不得建立向量索引"
+  },
+  "production_enabled": false,
+  "paid_api_calls": 0
+}

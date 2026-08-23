@@ -1,0 +1,3 @@
+# Optional local-only Chinese semantic retrieval backend.
+# Install explicitly; the default hashed-vector/BM25 path does not require it.
+sentence-transformers>=5.0.0,<6.0.0
