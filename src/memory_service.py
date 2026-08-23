@@ -341,6 +341,66 @@ class MemoryService:
             return self._db.list_memories()
         return []
 
+    def search_memories(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Keyword search over confirmed memories and memory store fields."""
+        needle = query.strip().lower()
+        if not needle:
+            return []
+
+        limit = max(1, min(50, limit))
+        matches: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def _add(source: str, memory_type: str, content: str, **extra: Any) -> None:
+            key = f"{memory_type}:{content}"
+            if key in seen:
+                return
+            seen.add(key)
+            matches.append(
+                {
+                    "source": source,
+                    "memory_type": memory_type,
+                    "content": content,
+                    **extra,
+                }
+            )
+
+        if self._use_sqlite and self._db:
+            for row in self._db.list_memories():
+                content = str(row.get("content", ""))
+                if needle in content.lower():
+                    _add(
+                        "sqlite",
+                        str(row.get("memory_type", "")),
+                        content,
+                        id=row.get("id"),
+                        importance=row.get("importance"),
+                    )
+
+        if self._use_sqlite and self._db:
+            self._sync_memory_from_db()
+
+        store = self.memory
+        if store.summary and needle in store.summary.lower():
+            _add("memory_store", "summary", store.summary)
+        for pref in store.preferences:
+            if needle in pref.lower():
+                _add("memory_store", "preference", pref)
+        for nick in store.nicknames:
+            if needle in nick.lower():
+                _add("memory_store", "nickname", nick)
+        for event in store.important_events:
+            if needle in event.lower():
+                _add("memory_store", "important_event", event)
+        for mood in store.emotional_states:
+            if needle in mood.lower():
+                _add("memory_store", "emotional_state", mood)
+        for rel in store.relationships:
+            if needle in rel.lower():
+                _add("memory_store", "relationship", rel)
+
+        return matches[:limit]
+
     def confirm_pending(self, pending_id: int) -> bool:
         if self._use_sqlite and self._db:
             ok = self._db.confirm_pending_memory(pending_id)

@@ -82,6 +82,13 @@ class AssetConfig:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    enabled: bool
+    max_rounds: int
+    mode: str
+
+
+@dataclass(frozen=True)
 class LoreRAGConfig:
     enabled: bool
     prototype_mode: bool
@@ -109,6 +116,7 @@ class AppConfig:
     audio_clips: AudioClipConfig
     assets: AssetConfig
     lore_rag: LoreRAGConfig
+    agent: AgentConfig
     memory_summarize_interval: int = 6
     max_history_turns: int = 20
     default_character_path: Path = CHARACTERS_DIR / "elysia_character.json"
@@ -141,6 +149,11 @@ def get_config() -> AppConfig:
     lore_vector_backend = os.getenv("LORE_RAG_VECTOR_BACKEND", "hashed").strip().lower()
     if lore_vector_backend not in {"hashed", "sentence-transformers"}:
         lore_vector_backend = "hashed"
+
+    agent_mode = os.getenv("AGENT_V2_MODE", "chat").strip().lower()
+    if agent_mode not in {"chat", "work"}:
+        agent_mode = "chat"
+    agent_max_rounds = max(1, min(20, int(os.getenv("AGENT_V2_MAX_ROUNDS", "6"))))
 
     return AppConfig(
         llm=LLMConfig(
@@ -235,6 +248,11 @@ def get_config() -> AppConfig:
             embedding_local_files_only=_env_bool(
                 "LORE_RAG_EMBEDDING_LOCAL_FILES_ONLY", "true"
             ),
+        ),
+        agent=AgentConfig(
+            enabled=_env_bool("ENABLE_AGENT_V2", "false"),
+            max_rounds=agent_max_rounds,
+            mode=agent_mode,
         ),
         memory_summarize_interval=summarize_interval,
     )

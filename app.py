@@ -16,6 +16,7 @@ from src.feedback_service import FeedbackService
 from src.llm_client import LLMClient
 from src.lore import LoreRAG
 from src.memory_service import MemoryService
+from src.agent import ElysiaHarness, build_default_registry
 from src.prompt_builder import build_system_prompt
 from src.reflection_service import ReflectionService
 from src.relationship_event_service import RelationshipEventService
@@ -540,7 +541,27 @@ def _handle_user_message(
         st.audio(str(thinking_clip))
 
     with st.spinner("爱莉希雅正在认真听你说的话……"):
-        reply = llm.chat(system_prompt, user_input, model=config.llm.chat_model)
+        if config.agent.enabled:
+            registry = build_default_registry(
+                memory_service,
+                companionship_svc,
+                memory_summary=prompt_memory.long_term_memory,
+            )
+            harness = ElysiaHarness(
+                llm,
+                registry,
+                config.agent,
+                model=config.llm.chat_model,
+            )
+            agent_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input},
+            ]
+            harness_result = harness.run(agent_messages, mode=config.agent.mode)
+            reply = harness_result.content
+            st.session_state["last_agent_trace"] = harness_result.trace.to_dict()
+        else:
+            reply = llm.chat(system_prompt, user_input, model=config.llm.chat_model)
     if config.lore_rag.require_citations:
         reply = lore_augmentation.append_sources(reply)
 

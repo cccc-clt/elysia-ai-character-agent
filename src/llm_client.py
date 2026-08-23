@@ -2,11 +2,32 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from openai import OpenAI
 
 from src.config import LLMConfig
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass
+class ChatResponse:
+    content: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: dict[str, Any] | None = None
+    raw_response: Any = None
+
+    @property
+    def has_tool_calls(self) -> bool:
+        return bool(self.tool_calls)
 
 
 class LLMClient:
@@ -48,6 +69,55 @@ class LLMClient:
         )
         content = response.choices[0].message.content
         return (content or "").strip()
+
+    def chat_messages(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResponse:
+        client = self._require_client()
+        kwargs: dict[str, Any] = {
+            "model": model or self._config.model_name,
+            "messages": messages,
+            "temperature": (
+                temperature if temperature is not None else self._config.temperature
+            ),
+            "max_tokens": max_tokens or self._config.max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        response = client.chat.completions.create(**kwargs)
+        message = response.choices[0].message
+        tool_calls: list[ToolCall] = []
+        if message.tool_calls:
+            for call in message.tool_calls:
+                tool_calls.append(
+                    ToolCall(
+                        id=call.id,
+                        name=call.function.name,
+                        arguments=call.function.arguments or "{}",
+                    )
+                )
+
+        usage: dict[str, Any] | None = None
+        if response.usage is not None:
+            usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+
+        return ChatResponse(
+            content=(message.content or "").strip() if message.content else None,
+            tool_calls=tool_calls,
+            usage=usage,
+            raw_response=response,
+        )
 
     def chat_json(self, system_prompt: str, user_message: str, model: str | None = None) -> str:
         client = self._require_client()
